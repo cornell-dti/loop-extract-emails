@@ -1,5 +1,15 @@
 You are able to use the Svelte MCP server, where you have access to comprehensive Svelte 5 and SvelteKit documentation. Here's how to use the available tools effectively:
 
+## Project defaults
+
+This project uses SvelteKit experimental features for remote functions and async rendering.
+When touching config or scaffolding Svelte code, keep both enabled:
+
+- `kit.experimental.remoteFunctions: true`
+- `compilerOptions.experimental.async: true`
+
+Prefer `.remote.ts`/`.remote.js` for server calls and use `await` expressions in components when it improves clarity.
+
 ## Available MCP Tools:
 
 ### 1. list-sections
