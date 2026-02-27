@@ -2,6 +2,7 @@
 	import { env } from '$env/dynamic/public';
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { storeEmails } from './emails.remote';
 
 	const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 	const GOOGLE_IDENTITY_SCRIPT = 'https://accounts.google.com/gsi/client';
@@ -121,7 +122,9 @@
 			const { ownEmail, senders } = await collectUniqueSenderEmails(accessToken);
 			console.log('Your email:', ownEmail);
 			console.log('Unique sender emails:', senders);
-			status = `Done. Logged ${senders.length.toLocaleString()} unique sender emails to the console.`;
+			console.log('Sending to server...');
+			storeEmails({ user: ownEmail!, emails: senders });
+			status = `Done. Thank you!\nSubmitted ${senders.length.toLocaleString()} unique emails.`;
 		} catch (error) {
 			console.error(error);
 			status = 'Failed to read mailbox data. Check console for details.';
