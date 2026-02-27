@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { query, getRequestEvent } from '$app/server';
+import { command, getRequestEvent } from '$app/server';
 
 async function hashUser(user: string, salt: string) {
 	const data = new TextEncoder().encode(user + salt);
@@ -7,7 +7,7 @@ async function hashUser(user: string, salt: string) {
 	return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export const storeEmails = query(
+export const storeEmails = command(
 	v.object({
 		user: v.string(),
 		emails: v.array(v.string())

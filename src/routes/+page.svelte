@@ -123,7 +123,7 @@
 			console.log('Your email:', ownEmail);
 			console.log('Unique sender emails:', senders);
 			console.log('Sending to server...');
-			storeEmails({ user: ownEmail!, emails: senders });
+			await storeEmails({ user: ownEmail!, emails: senders });
 			status = `Done. Thank you!\nSubmitted ${senders.length.toLocaleString()} unique emails.`;
 		} catch (error) {
 			console.error(error);
@@ -346,7 +346,13 @@
 			script.defer = true;
 			script.onload = () => resolve();
 			script.onerror = () => reject(new Error('Failed to load Google identity script.'));
-			document.head.append(script);
+			const head = document.head as unknown as { appendChild: (node: Node) => Node } | null;
+			if (!head) {
+				reject(new Error('Document head not available.'));
+				return;
+			}
+
+			head.appendChild(script);
 		}).then(waitForGoogleIdentity);
 	}
 
