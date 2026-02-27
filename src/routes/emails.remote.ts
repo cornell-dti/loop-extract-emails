@@ -1,6 +1,8 @@
 import * as v from 'valibot';
 import { command, getRequestEvent } from '$app/server';
 
+const EMAIL_BATCH_SIZE = 50;
+
 async function hashUser(user: string, salt: string) {
 	const data = new TextEncoder().encode(user + salt);
 	const digest = await crypto.subtle.digest('SHA-256', data);
@@ -22,31 +24,20 @@ export const storeEmails = command(
 
 		const userHash = await hashUser(user, salt);
 
-		await db.exec('BEGIN');
+		for (let i = 0; i < emails.length; i += EMAIL_BATCH_SIZE) {
+			const batchEmails = emails.slice(i, i + EMAIL_BATCH_SIZE);
+			const statements = batchEmails.flatMap((email) => [
+				db.prepare('INSERT OR IGNORE INTO emails (email) VALUES (?)').bind(email),
+				db
+					.prepare(
+						'INSERT OR IGNORE INTO email_submissions (email_id, user_hash) SELECT id, ? FROM emails WHERE email = ?'
+					)
+					.bind(userHash, email)
+			]);
 
-		try {
-			for (const email of emails) {
-				// insert email if new
-				await db.prepare('INSERT OR IGNORE INTO emails (email) VALUES (?)').bind(email).run();
-
-				// get email id
-				const row = await db
-					.prepare('SELECT id FROM emails WHERE email = ?')
-					.bind(email)
-					.first<{ id: number }>();
-
-				if (!row) continue;
-
-				// attempt unique submission insert
-				await db
-					.prepare('INSERT OR IGNORE INTO email_submissions (email_id, user_hash) VALUES (?, ?)')
-					.bind(row.id, userHash)
-					.run();
+			if (statements.length > 0) {
+				await db.batch(statements);
 			}
-			await db.exec('COMMIT');
-		} catch (err) {
-			await db.exec('ROLLBACK');
-			throw err;
 		}
 
 		return { success: true };
