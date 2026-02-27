@@ -2,6 +2,8 @@ You are able to use the Svelte MCP server, where you have access to comprehensiv
 
 ## Project defaults
 
+This project uses **Deno** as its runtime and package manager. Use `deno` instead of `npm`/`npx`/`pnpm`/`yarn` for all commands (e.g. `deno task dev`, `deno task build`, `deno task check`, `deno install`).
+
 This project uses SvelteKit experimental features for remote functions and async rendering.
 When touching config or scaffolding Svelte code, keep both enabled:
 
