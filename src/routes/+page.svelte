@@ -119,15 +119,14 @@
 		status = 'Reading mailbox history. This can take a while for large inboxes...';
 
 		try {
-			const { ownEmail, senders } = await collectUniqueSenderEmails(accessToken);
+			const { ownEmail, uniqueSenders, uploadedSenders } =
+				await collectAndUploadUniqueSenderEmails(accessToken);
 			console.log('Your email:', ownEmail);
-			console.log('Unique sender emails:', senders);
-			console.log('Sending to server...');
-			await storeEmails({ user: ownEmail!, emails: senders });
-			status = `Done. Thank you!\nSubmitted ${senders.length.toLocaleString()} unique emails.`;
+			status = `Done. Thank you!\nFound ${uniqueSenders.toLocaleString()} unique senders and submitted ${uploadedSenders.toLocaleString()} of them.`;
 		} catch (error) {
 			console.error(error);
-			status = 'Failed to read mailbox data. Check console for details.';
+			status =
+				'Failed while scanning or uploading a batch. Upload stopped immediately. Check console for details.';
 		} finally {
 			isWorking = false;
 		}
@@ -137,14 +136,18 @@
 	const MAX_RETRIES = 5;
 	const BATCH_DELAY_MS = 600; // ~100 batches/min = ~10k individual requests/min, well under 15k
 
-	async function collectUniqueSenderEmails(
+	async function collectAndUploadUniqueSenderEmails(
 		accessToken: string
-	): Promise<{ ownEmail: string | null; senders: string[] }> {
+	): Promise<{ ownEmail: string; uniqueSenders: number; uploadedSenders: number }> {
 		const profile = await gmailFetch<GmailProfileResponse>(
 			'https://gmail.googleapis.com/gmail/v1/users/me/profile',
 			accessToken
 		);
-		const ownEmail = profile.emailAddress?.toLowerCase() ?? null;
+		const ownEmail = profile.emailAddress?.toLowerCase();
+		if (!ownEmail) {
+			throw new Error('Could not determine signed-in Gmail address.');
+		}
+
 		estimatedTotalMessages =
 			typeof profile.messagesTotal === 'number' && profile.messagesTotal > 0
 				? profile.messagesTotal
@@ -153,6 +156,7 @@
 		const unique = new SvelteSet<string>();
 		let nextPageToken: string | undefined;
 		let processed = 0;
+		let uploaded = 0;
 
 		do {
 			const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
@@ -166,34 +170,41 @@
 			// Process in batches of 100 via the Gmail batch endpoint
 			for (const batch of chunk(messageIds, BATCH_SIZE)) {
 				const fromHeaders = await batchGetFromHeaders(batch, accessToken);
+				const newSenders: string[] = [];
 
 				for (const header of fromHeaders) {
 					for (const email of extractEmails(header)) {
-						if (email !== ownEmail) {
+						if (email !== ownEmail && !unique.has(email)) {
 							unique.add(email);
+							newSenders.push(email);
 						}
 					}
 				}
+
+				if (newSenders.length > 0) {
+					await storeEmails({ user: ownEmail, emails: newSenders });
+					uploaded += newSenders.length;
+				}
+
+				processed += batch.length;
+				scannedMessages = processed;
+				if (estimatedTotalMessages !== null && scannedMessages > estimatedTotalMessages) {
+					estimatedTotalMessages = scannedMessages;
+				}
+				const progressText = estimatedTotalMessages
+					? ` of ~${estimatedTotalMessages.toLocaleString()}`
+					: '';
+				status = `Scanned ${processed.toLocaleString()}${progressText} messages.\nFound ${unique.size.toLocaleString()} unique senders.\nUploaded ${uploaded.toLocaleString()} so far.`;
 
 				// Throttle between batches to stay under quota
 				if (messageIds.length > BATCH_SIZE) {
 					await sleep(BATCH_DELAY_MS);
 				}
 			}
-
-			processed += messageIds.length;
-			scannedMessages = processed;
-			if (estimatedTotalMessages !== null && scannedMessages > estimatedTotalMessages) {
-				estimatedTotalMessages = scannedMessages;
-			}
-			const progressText = estimatedTotalMessages
-				? ` of ~${estimatedTotalMessages.toLocaleString()}`
-				: '';
-			status = `Scanned ${processed.toLocaleString()}${progressText} messages.\nFound ${unique.size.toLocaleString()} unique senders.`;
 			nextPageToken = page.nextPageToken;
 		} while (nextPageToken);
 
-		return { ownEmail, senders: [...unique].sort((a, b) => a.localeCompare(b)) };
+		return { ownEmail, uniqueSenders: unique.size, uploadedSenders: uploaded };
 	}
 
 	/**
