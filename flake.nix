@@ -22,7 +22,10 @@
       perSystem = {
         devenv.shells.default = {
           languages = {
-            deno.enable = true;
+            javascript = {
+              enable = true;
+              pnpm.enable = true;
+            };
             typescript = {
               enable = true;
               lsp.enable = true;
