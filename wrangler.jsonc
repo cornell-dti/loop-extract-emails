@@ -2,12 +2,22 @@
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "extract-emails",
 	"compatibility_date": "2026-02-20",
-	"compatibility_flags": ["nodejs_als"],
+	"compatibility_flags": [
+		"nodejs_als"
+	],
 	"main": ".svelte-kit/cloudflare/_worker.js",
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".svelte-kit/cloudflare"
 	},
 	"workers_dev": true,
-	"preview_urls": true
+	"preview_urls": true,
+	"d1_databases": [
+		{
+			"binding": "loop_extract_emails_prod",
+			"database_name": "loop-extract-emails-prod",
+			"database_id": "d9ff26b8-19da-431f-a0a9-cb174b64acf9",
+			"remote": true
+		}
+	]
 }
