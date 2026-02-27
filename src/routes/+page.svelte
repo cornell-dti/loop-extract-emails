@@ -32,6 +32,7 @@
 	type GmailListResponse = {
 		messages?: Array<{ id: string }>;
 		nextPageToken?: string;
+		resultSizeEstimate?: number;
 	};
 
 	type GmailMessageResponse = {
@@ -42,11 +43,14 @@
 
 	type GmailProfileResponse = {
 		emailAddress?: string;
+		messagesTotal?: number;
 	};
 
 	let tokenClient: TokenClient | null = null;
 	let status = $state('Loading Google sign-in...');
 	let isWorking = $state(false);
+	let scannedMessages = $state(0);
+	let estimatedTotalMessages = $state<number | null>(null);
 
 	onMount(() => {
 		if (!GOOGLE_CLIENT_ID) {
@@ -108,6 +112,8 @@
 			return;
 		}
 
+		scannedMessages = 0;
+		estimatedTotalMessages = null;
 		isWorking = true;
 		status = 'Reading mailbox history. This can take a while for large inboxes...';
 
@@ -133,6 +139,10 @@
 			accessToken
 		);
 		const ownEmail = profile.emailAddress?.toLowerCase();
+		estimatedTotalMessages =
+			typeof profile.messagesTotal === 'number' && profile.messagesTotal > 0
+				? profile.messagesTotal
+				: null;
 
 		const unique = new SvelteSet<string>();
 		let nextPageToken: string | undefined;
@@ -142,7 +152,6 @@
 			const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
 			listUrl.searchParams.set('maxResults', '500');
 			listUrl.searchParams.set('includeSpamTrash', 'true');
-			listUrl.searchParams.set('q', '-from:me');
 			if (nextPageToken) listUrl.searchParams.set('pageToken', nextPageToken);
 
 			const page = await gmailFetch<GmailListResponse>(listUrl.toString(), accessToken);
@@ -167,7 +176,14 @@
 			}
 
 			processed += messageIds.length;
-			status = `Scanned ${processed.toLocaleString()} messages. Found ${unique.size.toLocaleString()} unique senders.`;
+			scannedMessages = processed;
+			if (estimatedTotalMessages !== null && scannedMessages > estimatedTotalMessages) {
+				estimatedTotalMessages = scannedMessages;
+			}
+			const progressText = estimatedTotalMessages
+				? ` of ~${estimatedTotalMessages.toLocaleString()}`
+				: '';
+			status = `Scanned ${processed.toLocaleString()}${progressText} messages.\nFound ${unique.size.toLocaleString()} unique senders.`;
 			nextPageToken = page.nextPageToken;
 		} while (nextPageToken);
 
@@ -286,6 +302,27 @@
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
+	function progressPercent(): number | null {
+		if (!estimatedTotalMessages || estimatedTotalMessages <= 0) return null;
+		const percent = (scannedMessages / estimatedTotalMessages) * 100;
+
+		if (isWorking && percent >= 100) {
+			return 99;
+		}
+
+		return Math.min(100, Math.max(0, Math.round(percent)));
+	}
+
+	function progressValue(): number | undefined {
+		if (!estimatedTotalMessages || estimatedTotalMessages <= 0) return undefined;
+
+		if (isWorking && scannedMessages >= estimatedTotalMessages) {
+			return estimatedTotalMessages * 0.99;
+		}
+
+		return Math.min(scannedMessages, estimatedTotalMessages);
+	}
+
 	function loadGoogleIdentityScript(): Promise<void> {
 		if (getGoogleNamespace()?.accounts?.oauth2) return Promise.resolve();
 
@@ -339,6 +376,18 @@
 	>
 		{isWorking ? 'Scanning inbox...' : 'Sign in with Google'}
 	</button>
+
+	{#if isWorking || scannedMessages > 0}
+		<div class="progress-wrap">
+			<div class="progress-meta">
+				<span>{scannedMessages.toLocaleString()} scanned</span>
+				<span>{progressPercent() === null ? 'Estimating total...' : `${progressPercent()}%`}</span>
+			</div>
+			<progress class="progress" max={estimatedTotalMessages ?? 1} value={progressValue()}
+			></progress>
+		</div>
+	{/if}
+
 	<p class="status">{status}</p>
 </main>
 
@@ -358,8 +407,11 @@
 		min-height: 100dvh;
 		display: grid;
 		place-content: center;
+		justify-items: center;
 		gap: 1rem;
 		padding: 1.5rem;
+		width: min(34rem, 94vw);
+		margin-inline: auto;
 		text-align: center;
 	}
 
@@ -389,11 +441,59 @@
 		opacity: 0.65;
 	}
 
+	.progress-wrap {
+		width: min(28rem, 100%);
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.progress-meta {
+		display: flex;
+		justify-content: space-between;
+		font-size: 0.85rem;
+		color: #cbd5e1;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.progress-meta span:last-child {
+		min-width: 5ch;
+		text-align: right;
+	}
+
+	.progress {
+		width: 100%;
+		height: 0.7rem;
+		appearance: none;
+		-webkit-appearance: none;
+		border: 0;
+		border-radius: 999px;
+		overflow: hidden;
+		background: #0b1220;
+		box-shadow: inset 0 0 0 1px #93c5fd66;
+	}
+
+	.progress::-webkit-progress-bar {
+		background: #0b1220;
+		border-radius: 999px;
+	}
+
+	.progress::-webkit-progress-value {
+		background: linear-gradient(90deg, #38bdf8, #60a5fa);
+		border-radius: 999px;
+	}
+
+	.progress::-moz-progress-bar {
+		background: linear-gradient(90deg, #38bdf8, #60a5fa);
+		border-radius: 999px;
+	}
+
 	.status {
-		margin: 0;
+		margin: 0 auto;
+		width: min(28rem, 100%);
 		max-width: 40ch;
 		font-size: 0.95rem;
 		line-height: 1.45;
 		color: #cbd5e1;
+		text-align: center;
 	}
 </style>
