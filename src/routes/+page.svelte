@@ -119,10 +119,9 @@
 		status = 'Reading mailbox history. This can take a while for large inboxes...';
 
 		try {
-			const { ownEmail, uniqueSenders, uploadedSenders } =
-				await collectAndUploadUniqueSenderEmails(accessToken);
+			const { ownEmail, uniqueSenders } = await collectAndUploadUniqueSenderEmails(accessToken);
 			console.log('Your email:', ownEmail);
-			status = `Done. Thank you!\nFound ${uniqueSenders.toLocaleString()} unique senders and submitted ${uploadedSenders.toLocaleString()} of them.`;
+			status = `Done. Thank you!\nFound and uploaded ${uniqueSenders.toLocaleString()} unique senders.`;
 		} catch (error) {
 			console.error(error);
 			status =
@@ -132,13 +131,14 @@
 		}
 	}
 
-	const BATCH_SIZE = 100; // Gmail batch API max
+	const BATCH_SIZE = 500;
+	const GMAIL_BATCH_API_SIZE = 100; // Gmail batch endpoint max requests per call
 	const MAX_RETRIES = 5;
-	const BATCH_DELAY_MS = 600; // ~100 batches/min = ~10k individual requests/min, well under 15k
+	const BATCH_DELAY_MS = 600;
 
 	async function collectAndUploadUniqueSenderEmails(
 		accessToken: string
-	): Promise<{ ownEmail: string; uniqueSenders: number; uploadedSenders: number }> {
+	): Promise<{ ownEmail: string; uniqueSenders: number }> {
 		const profile = await gmailFetch<GmailProfileResponse>(
 			'https://gmail.googleapis.com/gmail/v1/users/me/profile',
 			accessToken
@@ -156,7 +156,6 @@
 		const unique = new SvelteSet<string>();
 		let nextPageToken: string | undefined;
 		let processed = 0;
-		let uploaded = 0;
 
 		do {
 			const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
@@ -167,7 +166,7 @@
 			const page = await gmailFetch<GmailListResponse>(listUrl.toString(), accessToken);
 			const messageIds = page.messages?.map((m) => m.id) ?? [];
 
-			// Process in batches of 100 via the Gmail batch endpoint
+			// Process and upload in batches of 500 messages
 			for (const batch of chunk(messageIds, BATCH_SIZE)) {
 				const fromHeaders = await batchGetFromHeaders(batch, accessToken);
 				const newSenders: string[] = [];
@@ -182,8 +181,9 @@
 				}
 
 				if (newSenders.length > 0) {
-					await storeEmails({ user: ownEmail, emails: newSenders });
-					uploaded += newSenders.length;
+					for (const senderBatch of chunk(newSenders, BATCH_SIZE)) {
+						await storeEmails({ user: ownEmail, emails: senderBatch });
+					}
 				}
 
 				processed += batch.length;
@@ -194,17 +194,17 @@
 				const progressText = estimatedTotalMessages
 					? ` of ~${estimatedTotalMessages.toLocaleString()}`
 					: '';
-				status = `Scanned ${processed.toLocaleString()}${progressText} messages.\nFound ${unique.size.toLocaleString()} unique senders.\nUploaded ${uploaded.toLocaleString()} so far.`;
+				status = `Scanned ${processed.toLocaleString()}${progressText} messages.\nFound ${unique.size.toLocaleString()} unique senders.`;
 
 				// Throttle between batches to stay under quota
-				if (messageIds.length > BATCH_SIZE) {
+				if (batch.length === BATCH_SIZE) {
 					await sleep(BATCH_DELAY_MS);
 				}
 			}
 			nextPageToken = page.nextPageToken;
 		} while (nextPageToken);
 
-		return { ownEmail, uniqueSenders: unique.size, uploadedSenders: uploaded };
+		return { ownEmail, uniqueSenders: unique.size };
 	}
 
 	/**
@@ -212,26 +212,31 @@
 	 * in a single HTTP request. Falls back to individual fetches on parse failure.
 	 */
 	async function batchGetFromHeaders(messageIds: string[], accessToken: string): Promise<string[]> {
-		const boundary = `batch_${crypto.randomUUID()}`;
+		const allHeaders: string[] = [];
 
-		const parts = messageIds.map(
-			(id) =>
-				`--${boundary}\r\nContent-Type: application/http\r\n\r\nGET /gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From HTTP/1.1\r\n\r\n`
-		);
+		for (const requestBatch of chunk(messageIds, GMAIL_BATCH_API_SIZE)) {
+			const boundary = `batch_${crypto.randomUUID()}`;
+			const parts = requestBatch.map(
+				(id) =>
+					`--${boundary}\r\nContent-Type: application/http\r\n\r\nGET /gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From HTTP/1.1\r\n\r\n`
+			);
 
-		const body = parts.join('') + `--${boundary}--`;
+			const body = parts.join('') + `--${boundary}--`;
 
-		const response = await fetchWithRetry('https://www.googleapis.com/batch/gmail/v1', {
-			method: 'POST',
-			headers: {
-				Authorization: `Bearer ${accessToken}`,
-				'Content-Type': `multipart/mixed; boundary=${boundary}`
-			},
-			body
-		});
+			const response = await fetchWithRetry('https://www.googleapis.com/batch/gmail/v1', {
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${accessToken}`,
+					'Content-Type': `multipart/mixed; boundary=${boundary}`
+				},
+				body
+			});
 
-		const responseText = await response.text();
-		return parseBatchResponse(responseText);
+			const responseText = await response.text();
+			allHeaders.push(...parseBatchResponse(responseText));
+		}
+
+		return allHeaders;
 	}
 
 	/**
