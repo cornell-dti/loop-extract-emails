@@ -118,9 +118,10 @@
 		status = 'Reading mailbox history. This can take a while for large inboxes...';
 
 		try {
-			const uniqueSenders = await collectUniqueSenderEmails(accessToken);
-			console.log('Unique sender emails:', uniqueSenders);
-			status = `Done. Logged ${uniqueSenders.length.toLocaleString()} unique sender emails to the console.`;
+			const { ownEmail, senders } = await collectUniqueSenderEmails(accessToken);
+			console.log('Your email:', ownEmail);
+			console.log('Unique sender emails:', senders);
+			status = `Done. Logged ${senders.length.toLocaleString()} unique sender emails to the console.`;
 		} catch (error) {
 			console.error(error);
 			status = 'Failed to read mailbox data. Check console for details.';
@@ -133,12 +134,14 @@
 	const MAX_RETRIES = 5;
 	const BATCH_DELAY_MS = 600; // ~100 batches/min = ~10k individual requests/min, well under 15k
 
-	async function collectUniqueSenderEmails(accessToken: string): Promise<string[]> {
+	async function collectUniqueSenderEmails(
+		accessToken: string
+	): Promise<{ ownEmail: string | null; senders: string[] }> {
 		const profile = await gmailFetch<GmailProfileResponse>(
 			'https://gmail.googleapis.com/gmail/v1/users/me/profile',
 			accessToken
 		);
-		const ownEmail = profile.emailAddress?.toLowerCase();
+		const ownEmail = profile.emailAddress?.toLowerCase() ?? null;
 		estimatedTotalMessages =
 			typeof profile.messagesTotal === 'number' && profile.messagesTotal > 0
 				? profile.messagesTotal
@@ -187,7 +190,7 @@
 			nextPageToken = page.nextPageToken;
 		} while (nextPageToken);
 
-		return [...unique].sort((a, b) => a.localeCompare(b));
+		return { ownEmail, senders: [...unique].sort((a, b) => a.localeCompare(b)) };
 	}
 
 	/**
