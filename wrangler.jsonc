@@ -3,6 +3,7 @@
 	"name": "loop-extract-emails",
 	"compatibility_date": "2026-02-20",
 	"compatibility_flags": ["nodejs_als"],
+	"account_id": "b287c94b13bd9617c8a7d2498ffcf8c2",
 	"main": ".svelte-kit/cloudflare/_worker.js",
 	"assets": {
 		"binding": "ASSETS",
@@ -14,7 +15,7 @@
 		{
 			"binding": "loop_extract_emails_prod",
 			"database_name": "loop-extract-emails-prod",
-			"database_id": "d9ff26b8-19da-431f-a0a9-cb174b64acf9",
+			"database_id": "6f2ed02a-0a28-493c-bc4b-8fb9f57f7a19",
 			"remote": true
 		}
 	]
