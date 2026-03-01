@@ -1,22 +1,8 @@
-# sv
+# loop-extract-emails
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Loop's waitlist and email extractor.
 
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-pnpm create sv@latest my-app
-```
-
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-pnpm dlx sv create --template minimal --types ts --add prettier eslint tailwindcss="plugins:typography,forms" sveltekit-adapter="adapter:cloudflare+cfTarget:workers" devtools-json mcp="ide:claude-code,opencode+setup:remote" --install pnpm extract-emails
-```
+After signing in with Google, `loop-extract-emails` will store all unique senders in the user's mailbox in [Cloudflare D1](https://developers.cloudflare.com/d1/).
 
 ## Developing
 
@@ -29,9 +15,11 @@ pnpm dev
 pnpm dev -- --open
 ```
 
+This might also prompt for Cloudflare authorization, as the dev server connects to the production D1 instance. If authorization doesn't work, consult the configuration in [`wrangler.jsonc`](./wrangler.jsonc).
+
 ## Building
 
-To create a production version of your app:
+To create a production version of the app:
 
 ```sh
 pnpm build
@@ -39,4 +27,4 @@ pnpm build
 
 You can preview the production build with `pnpm preview`.
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+> For deployment, a [Cloudflare Worker](https://workers.cloudflare.com/) is configured to automatically track the `main` branch.
