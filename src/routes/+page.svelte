@@ -47,6 +47,25 @@
 		messagesTotal?: number;
 	};
 
+	type StoreEmailsPayload = {
+		user: string;
+		emails: string[];
+	};
+
+	type RetryDecision = {
+		retryable: boolean;
+		reason: string;
+		retryAfterMs?: number;
+	};
+
+	type GoogleErrorPayload = {
+		error?: {
+			message?: string;
+			status?: string;
+			errors?: Array<{ reason?: string }>;
+		};
+	};
+
 	let tokenClient: TokenClient | null = null;
 	let status = $state('Loading Google sign-in...');
 	let isWorking = $state(false);
@@ -124,8 +143,7 @@
 			status = `Done. Thank you!\nFound and uploaded ${uniqueSenders.toLocaleString()} unique senders.`;
 		} catch (error) {
 			console.error(error);
-			status =
-				'Failed while scanning or uploading a batch. Upload stopped immediately. Check console for details.';
+			status = `Stopped due to a non-retryable error:\n${formatUserFacingError(error)}`;
 		} finally {
 			isWorking = false;
 		}
@@ -133,8 +151,16 @@
 
 	const BATCH_SIZE = 500;
 	const GMAIL_BATCH_API_SIZE = 100; // Gmail batch endpoint max requests per call
-	const MAX_RETRIES = 5;
 	const BATCH_DELAY_MS = 600;
+	const RETRY_BASE_DELAY_MS = 1000;
+	const RETRY_MAX_DELAY_MS = 120_000;
+	const RETRYABLE_GMAIL_403_REASONS = new Set([
+		'ratelimitexceeded',
+		'userratelimitexceeded',
+		'quotaexceeded',
+		'dailylimitexceeded',
+		'backenderror'
+	]);
 
 	async function collectAndUploadUniqueSenderEmails(
 		accessToken: string
@@ -182,7 +208,7 @@
 
 				if (newSenders.length > 0) {
 					for (const senderBatch of chunk(newSenders, BATCH_SIZE)) {
-						await storeEmails({ user: ownEmail, emails: senderBatch });
+						await storeEmailsWithRetry({ user: ownEmail, emails: senderBatch });
 					}
 				}
 
@@ -283,26 +309,47 @@
 	}
 
 	/**
-	 * fetch() with exponential backoff on 429 and 403 rate-limit errors.
+	 * fetch() with backoff for transient Gmail and network failures.
 	 */
-	async function fetchWithRetry(url: string, init: RequestInit, attempt = 0): Promise<Response> {
-		const response = await fetch(url, init);
+	async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+		let attempt = 0;
 
-		if ((response.status === 429 || response.status === 403) && attempt < MAX_RETRIES) {
-			const backoff = Math.min(1000 * 2 ** attempt, 32_000);
-			const jitter = Math.random() * 1000;
-			const delay = backoff + jitter;
-			status = `Rate limited. Retrying in ${Math.round(delay / 1000)}s...`;
-			await sleep(delay);
-			return fetchWithRetry(url, init, attempt + 1);
+		while (true) {
+			try {
+				const response = await fetch(url, init);
+
+				if (response.ok) {
+					return response;
+				}
+
+				const body = await response.text();
+				const decision = getGmailRetryDecision(response, body);
+
+				if (!decision.retryable) {
+					throw new Error(`Gmail API error ${response.status}: ${body}`);
+				}
+
+				const delay = computeRetryDelay(attempt, decision.retryAfterMs);
+				attempt += 1;
+				status = `${decision.reason}. Waiting ${formatDelay(delay)} before retry ${attempt.toLocaleString()}...`;
+				await sleep(delay);
+			} catch (error) {
+				if (error instanceof Error && error.message.startsWith('Gmail API error ')) {
+					throw error;
+				}
+
+				const decision = getNetworkRetryDecision(error);
+
+				if (!decision.retryable) {
+					throw error;
+				}
+
+				const delay = computeRetryDelay(attempt);
+				attempt += 1;
+				status = `${decision.reason}. Waiting ${formatDelay(delay)} before retry ${attempt.toLocaleString()}...`;
+				await sleep(delay);
+			}
 		}
-
-		if (!response.ok) {
-			const body = await response.text();
-			throw new Error(`Gmail API error ${response.status}: ${body}`);
-		}
-
-		return response;
 	}
 
 	async function gmailFetch<T>(url: string, accessToken: string): Promise<T> {
@@ -310,6 +357,254 @@
 			headers: { Authorization: `Bearer ${accessToken}` }
 		});
 		return (await response.json()) as T;
+	}
+
+	async function storeEmailsWithRetry(payload: StoreEmailsPayload): Promise<void> {
+		let attempt = 0;
+
+		while (true) {
+			try {
+				await storeEmails(payload);
+				return;
+			} catch (error) {
+				const decision = getUploadRetryDecision(error);
+
+				if (!decision.retryable) {
+					throw error;
+				}
+
+				const delay = computeRetryDelay(attempt, decision.retryAfterMs);
+				attempt += 1;
+				status = `${decision.reason}. Waiting ${formatDelay(delay)} before retry ${attempt.toLocaleString()}...`;
+				await sleep(delay);
+			}
+		}
+	}
+
+	function getGmailRetryDecision(response: Response, body: string): RetryDecision {
+		const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
+
+		if (response.status === 429) {
+			return {
+				retryable: true,
+				reason: 'Gmail is rate limiting requests',
+				retryAfterMs
+			};
+		}
+
+		if (response.status === 403 && isGmailRateLimitError(body)) {
+			return {
+				retryable: true,
+				reason: 'Gmail quota is temporarily exhausted',
+				retryAfterMs
+			};
+		}
+
+		if (response.status === 408 || response.status === 425 || response.status >= 500) {
+			return {
+				retryable: true,
+				reason: `Gmail returned ${response.status}`,
+				retryAfterMs
+			};
+		}
+
+		return { retryable: false, reason: 'Non-retryable Gmail error' };
+	}
+
+	function getNetworkRetryDecision(error: unknown): RetryDecision {
+		if (error instanceof DOMException && error.name === 'AbortError') {
+			return { retryable: false, reason: 'Request was aborted' };
+		}
+
+		const message = getErrorMessage(error).toLowerCase();
+		const isNetworkLikeError =
+			error instanceof TypeError ||
+			/failed to fetch|networkerror|network error|request failed|connection reset|timed out|timeout/.test(
+				message
+			);
+
+		if (isNetworkLikeError) {
+			return {
+				retryable: true,
+				reason: 'Network issue while contacting Gmail'
+			};
+		}
+
+		return { retryable: false, reason: 'Non-retryable network error' };
+	}
+
+	function getUploadRetryDecision(error: unknown): RetryDecision {
+		const statusCode = getErrorStatusCode(error);
+		const message = getErrorMessage(error).toLowerCase();
+
+		if (
+			statusCode === 408 ||
+			statusCode === 425 ||
+			statusCode === 429 ||
+			(statusCode !== null && statusCode >= 500)
+		) {
+			return {
+				retryable: true,
+				reason: 'Upload endpoint is temporarily unavailable'
+			};
+		}
+
+		if (statusCode === 403 && /rate|quota|limit/.test(message)) {
+			return {
+				retryable: true,
+				reason: 'Upload endpoint is temporarily throttled'
+			};
+		}
+
+		if (
+			/too many requests|rate limit|temporarily unavailable|database is locked|database is busy|timed out|timeout|failed to fetch|network error|networkerror|connection reset|overloaded|try again/.test(
+				message
+			)
+		) {
+			return {
+				retryable: true,
+				reason: 'Upload temporarily failed'
+			};
+		}
+
+		return { retryable: false, reason: 'Non-retryable upload error' };
+	}
+
+	function isGmailRateLimitError(body: string): boolean {
+		const lowered = body.toLowerCase();
+		if (/rate\s*limit|quota|too many requests|daily limit|user rate limit/.test(lowered)) {
+			return true;
+		}
+
+		const payload = parseGoogleErrorPayload(body);
+		if (!payload?.error) return false;
+
+		const reasons = payload.error.errors?.map((entry) => entry.reason?.toLowerCase() ?? '') ?? [];
+		if (reasons.some((reason) => RETRYABLE_GMAIL_403_REASONS.has(reason))) {
+			return true;
+		}
+
+		const statusCode = payload.error.status?.toLowerCase() ?? '';
+		if (statusCode.includes('resource_exhausted')) {
+			return true;
+		}
+
+		const message = payload.error.message?.toLowerCase() ?? '';
+		return /rate\s*limit|quota|too many requests|daily limit/.test(message);
+	}
+
+	function parseGoogleErrorPayload(body: string): GoogleErrorPayload | null {
+		try {
+			return JSON.parse(body) as GoogleErrorPayload;
+		} catch {
+			return null;
+		}
+	}
+
+	function parseRetryAfter(headerValue: string | null): number | undefined {
+		if (!headerValue) return undefined;
+
+		const seconds = Number.parseFloat(headerValue);
+		if (Number.isFinite(seconds) && seconds >= 0) {
+			return Math.round(seconds * 1000);
+		}
+
+		const dateMs = Date.parse(headerValue);
+		if (Number.isNaN(dateMs)) return undefined;
+
+		return Math.max(0, dateMs - Date.now());
+	}
+
+	function computeRetryDelay(attempt: number, retryAfterMs?: number): number {
+		const exponent = Math.min(attempt, 8);
+		const backoff = Math.min(RETRY_BASE_DELAY_MS * 2 ** exponent, RETRY_MAX_DELAY_MS);
+		const jitter = Math.random() * 1000;
+		const computedDelay = Math.round(backoff + jitter);
+
+		if (typeof retryAfterMs === 'number' && retryAfterMs > 0) {
+			return Math.max(computedDelay, Math.round(retryAfterMs));
+		}
+
+		return computedDelay;
+	}
+
+	function formatDelay(ms: number): string {
+		const totalSeconds = Math.max(1, Math.round(ms / 1000));
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+
+		if (minutes === 0) {
+			return `${totalSeconds}s`;
+		}
+
+		if (seconds === 0) {
+			return `${minutes}m`;
+		}
+
+		return `${minutes}m ${seconds}s`;
+	}
+
+	function getErrorStatusCode(error: unknown): number | null {
+		if (typeof error === 'object' && error !== null) {
+			const status = (error as { status?: unknown }).status;
+			if (typeof status === 'number' && Number.isFinite(status)) {
+				return status;
+			}
+		}
+
+		const message = getErrorMessage(error);
+		const explicitMatch =
+			message.match(/status(?: code)?\s*(\d{3})/i) ?? message.match(/error\s*(\d{3})/i);
+		if (explicitMatch) {
+			return Number.parseInt(explicitMatch[1], 10);
+		}
+
+		const knownMatch = message.match(/\b(403|408|425|429|500|502|503|504)\b/);
+		if (knownMatch) {
+			return Number.parseInt(knownMatch[1], 10);
+		}
+
+		return null;
+	}
+
+	function getErrorMessage(error: unknown): string {
+		if (typeof error === 'string') return error;
+
+		if (error instanceof Error && typeof error.message === 'string') {
+			return error.message;
+		}
+
+		if (typeof error === 'object' && error !== null) {
+			const text = (error as { text?: unknown }).text;
+			if (typeof text === 'string' && text.trim()) {
+				return text;
+			}
+
+			const message = (error as { message?: unknown }).message;
+			if (typeof message === 'string' && message.trim()) {
+				return message;
+			}
+
+			try {
+				return JSON.stringify(error);
+			} catch {
+				return 'Unknown error';
+			}
+		}
+
+		return 'Unknown error';
+	}
+
+	function formatUserFacingError(error: unknown): string {
+		const message = getErrorMessage(error).trim();
+		if (!message) return 'Unexpected error. Please try again.';
+
+		const normalized = message.replace(/\s+/g, ' ');
+		if (normalized.length <= 220) {
+			return normalized;
+		}
+
+		return `${normalized.slice(0, 217)}...`;
 	}
 
 	function chunk<T>(items: T[], size: number): T[][] {
