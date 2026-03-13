@@ -1,6 +1,13 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "mcp__figma__get_design_context",
+      "mcp__svelte__svelte-autofixer"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "svelte"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

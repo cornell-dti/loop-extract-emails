@@ -43,3 +43,17 @@ export const storeEmails = command(
 		return { success: true };
 	}
 );
+
+export const storeWaitlistEmail = command(
+	v.object({ email: v.pipe(v.string(), v.email()) }),
+	async ({ email }) => {
+		const { platform } = getRequestEvent();
+		const db = platform?.env.loop_extract_emails_prod;
+		if (!db) throw new Error('D1 binding not configured');
+		await db
+			.prepare('INSERT OR IGNORE INTO waitlist_emails (email) VALUES (?)')
+			.bind(email)
+			.run();
+		return { success: true };
+	}
+);
