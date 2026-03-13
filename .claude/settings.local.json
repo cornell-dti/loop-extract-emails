@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python3:*)",
       "mcp__figma__get_design_context",
-      "mcp__svelte__svelte-autofixer"
+      "mcp__svelte__svelte-autofixer",
+      "mcp__claude_ai_Figma__get_design_context"
     ]
   },
   "enableAllProjectMcpServers": true,

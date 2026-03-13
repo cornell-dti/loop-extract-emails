@@ -24,6 +24,8 @@
 	let email = $state('');
 	let submitting = $state(false);
 	let submitted = $state(false);
+	let consenting = $state(false);
+	let consented = $state(false);
 	let errorMsg = $state('');
 
 	let loopySvg: SVGSVGElement | null = $state(null);
@@ -59,7 +61,11 @@
 
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
-		if (!email || submitting) return;
+		if (!email) {
+			errorMsg = 'Please fill out this field.';
+			return;
+		}
+		if (submitting) return;
 		submitting = true;
 		errorMsg = '';
 		try {
@@ -136,18 +142,37 @@
 			<div class="stamp-card">
 				<img class="stamp-bg" src={stampCard} alt="" />
 				<div class="stamp-content">
-					<img src={loopLogo} alt="Loop" class="loop-logo" />
-					<p class="tagline">Your Cornell news, curated.</p>
+					{#if !submitted}
+						<img src={loopLogo} alt="Loop" class="loop-logo" />
+						<p class="tagline">Your Cornell news, curated.</p>
+					{/if}
 
-					{#if submitted}
-						<p class="success">You're on the list!</p>
+					{#if submitted && !consented}
+						<div class="consent-screen">
+							<img src={loopLogo} alt="Loop" class="loop-logo" />
+							<p class="success">You're on the list!</p>
+							<div class="consent-body">
+								<p class="consent-heading">Do you consent to inbox sender scanning?</p>
+								<p class="consent-desc">By clicking Consent, you allow Loop to securely scan your Gmail metadata to identify unique senders. You can request deletion anytime.</p>
+							</div>
+							{#if consenting}
+							<div class="progress-track">
+								<div class="progress-fill" onanimationend={() => consented = true}></div>
+							</div>
+						{:else}
+							<button type="button" class="consent-btn" onclick={() => consenting = true}>Consent</button>
+						{/if}
+						</div>
+					{:else if consented}
+						<img src={loopLogo} alt="Loop" class="loop-logo" />
+						<p class="success">Inbox scan successful!</p>
+						<p class="thank-you">Thank you for joining Loop. We'll curate your Cornell news and be in touch soon.</p>
 					{:else}
-						<form onsubmit={handleSubmit}>
+						<form onsubmit={handleSubmit} novalidate>
 							<input
 								type="email"
 								placeholder="Enter Email"
 								bind:value={email}
-								required
 								disabled={submitting}
 							/>
 							<button type="submit" disabled={submitting}>
@@ -242,7 +267,7 @@
 		padding: 14% 12%;
 		box-sizing: border-box;
 		text-align: center;
-		/*top: 14.8% !important;*/
+		top: -5% !important;
 	}
 
 	/*
@@ -324,11 +349,89 @@
 		cursor: not-allowed;
 	}
 
+	.consent-screen {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.85rem;
+		transform: translateY(4%);
+	}
+
+	.consent-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		text-align: center;
+	}
+
+	.consent-heading {
+		margin: 0;
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: #00304e;
+	}
+
+	.consent-desc {
+		margin: 0;
+		font-size: 0.75rem;
+		font-weight: 400;
+		color: #00304e;
+		opacity: 0.8;
+		line-height: 1.4;
+	}
+
+	.progress-track {
+		width: 100%;
+		height: 10px;
+		background: #f0e8e1;
+		border-radius: 999px;
+		overflow: hidden;
+	}
+
+	.progress-fill {
+		height: 100%;
+		width: 0%;
+		background: #eb7128;
+		border-radius: 999px;
+		animation: fill-progress 2s ease-in-out forwards;
+	}
+
+	@keyframes fill-progress {
+		from { width: 0%; }
+		to { width: 100%; }
+	}
+
+	.consent-btn {
+		border: none;
+		border-radius: 8px;
+		padding: 0.55rem 1.25rem;
+		font-family: 'Manrope', sans-serif;
+		font-size: 0.875rem;
+		font-weight: 500;
+		color: white;
+		background: #eb7128;
+		cursor: pointer;
+		transition: opacity 150ms;
+	}
+
+	.consent-btn:hover {
+		opacity: 0.9;
+	}
+
 	.success {
 		margin: 0;
 		font-size: 1rem;
 		font-weight: 600;
 		color: #eb7128;
+	}
+
+	.thank-you {
+		margin: 0;
+		font-size: 0.8rem;
+		font-weight: 400;
+		color: rgba(0, 0, 0, 0.55);
+		text-align: center;
+		line-height: 1.4;
 	}
 
 	.error {
