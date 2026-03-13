@@ -160,7 +160,7 @@
 								<div class="progress-fill" onanimationend={() => consented = true}></div>
 							</div>
 						{:else}
-							<button type="button" class="consent-btn" onclick={() => consenting = true}>Consent</button>
+							<button type="button" class="consent-btn" onclick={() => consenting = true}>Sign in with Gmail</button>
 						{/if}
 						</div>
 					{:else if consented}
@@ -197,22 +197,25 @@
 <style>
 	:global(html, body) {
 		margin: 0;
-		min-height: 100dvh;
+		height: 100dvh;
+		overflow: hidden;
 		font-family: 'Manrope', sans-serif;
 	}
 
 	main {
-		min-height: 100dvh;
+		height: 100dvh;
 		display: flex;
 		flex-direction: column;
 		position: relative;
 		background-size: cover;
 		background-position: center top;
+		overflow: hidden;
 	}
 
 	/* ── Hero ────────────────────────────────────────────── */
 	.hero {
 		flex: 1;
+		min-height: 0;
 		position: relative;
 		display: flex;
 		align-items: center;
@@ -220,7 +223,6 @@
 		overflow: hidden;
 		width: 100%;
 		max-width: 1000px;
-		max-height: 800px;
 		margin: 0 auto;
 		padding: 4rem 1rem 2rem;
 		box-sizing: border-box;
@@ -517,7 +519,7 @@
 		overflow: hidden;
 		display: flex;
 		justify-content: center;
-		align-items: flex-start;
+		align-items: flex-end;
 	}
 
 	.mockup-strip img {
@@ -526,7 +528,7 @@
 		display: block;
 	}
 
-	/* ── Tablet ≤768px: hide mockup, adjust hero ─────────── */
+	/* ── Tablet ≤768px: adjust hero ─────────────────────── */
 	@media (max-width: 768px) {
 		.mockup-strip {
 			display: none;
@@ -534,16 +536,18 @@
 
 		.hero {
 			padding: 3rem 1rem 1.5rem;
-			max-height: none;
 		}
 	}
 
 	/* ── Mobile ≤540px: floaters above/below stamp ───────── */
 	@media (max-width: 540px) {
+		.mockup-strip {
+			height: 14dvh;
+		}
+
 		.hero {
 			padding-top: 140px;
 			padding-bottom: 180px;
-			max-height: none;
 		}
 
 		.stamp-wrapper {
