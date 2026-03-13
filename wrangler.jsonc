@@ -15,8 +15,8 @@
 		{
 			"binding": "loop_extract_emails_prod",
 			"database_name": "loop-extract-emails-prod",
-			"database_id": "6f2ed02a-0a28-493c-bc4b-8fb9f57f7a19"
+			"database_id": "6f2ed02a-0a28-493c-bc4b-8fb9f57f7a19",
+			"remote": true
 		}
 	]
 }
-
