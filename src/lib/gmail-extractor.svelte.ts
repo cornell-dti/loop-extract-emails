@@ -18,6 +18,7 @@ type GoogleNamespace = {
 			initTokenClient: (config: {
 				client_id: string;
 				scope: string;
+				hosted_domain?: string;
 				callback: (response: TokenResponse) => void;
 			}) => TokenClient;
 		};
@@ -66,6 +67,7 @@ type StoreEmailsFn = (payload: StoreEmailsPayload) => Promise<unknown>;
 
 const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const GOOGLE_IDENTITY_SCRIPT = 'https://accounts.google.com/gsi/client';
+const GOOGLE_HOSTED_DOMAIN = 'cornell.edu';
 
 const BATCH_SIZE = 500;
 const GMAIL_BATCH_API_SIZE = 100;
@@ -135,6 +137,7 @@ export class GmailExtractor {
 				this.#tokenClient = oauth2.initTokenClient({
 					client_id: this.#googleClientId!,
 					scope: GOOGLE_SCOPE,
+					hosted_domain: GOOGLE_HOSTED_DOMAIN,
 					callback: (response) => {
 						void this.#handleTokenResponse(response);
 					}
