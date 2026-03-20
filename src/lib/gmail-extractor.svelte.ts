@@ -167,6 +167,23 @@ export class GmailExtractor {
 		this.#tokenClient.requestAccessToken({ prompt: 'consent' });
 	}
 
+	reset(): void {
+		this.isWorking = false;
+		this.completed = false;
+		this.hasError = false;
+		this.scannedMessages = 0;
+		this.estimatedTotalMessages = null;
+
+		if (!this.#googleClientId) {
+			this.status = 'Missing PUBLIC_GOOGLE_CLIENT_ID. Add it to your environment and reload.';
+			return;
+		}
+
+		this.status = this.#tokenClient
+			? 'Ready. Click "Sign in with Google".'
+			: 'Loading Google sign-in...';
+	}
+
 	async #handleTokenResponse(response: TokenResponse): Promise<void> {
 		if (response.error) {
 			this.hasError = true;

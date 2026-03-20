@@ -125,6 +125,17 @@
 		void extractor.signIn();
 	}
 
+	function resetFlow() {
+		stopConsentMonitor();
+		email = '';
+		submitting = false;
+		submitted = false;
+		consenting = false;
+		consented = false;
+		errorMsg = '';
+		extractor.reset();
+	}
+
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
 		if (!email) {
@@ -146,6 +157,10 @@
 </script>
 
 <main style="background-image: url('{background}')">
+	{#if submitted}
+		<button type="button" class="reset-capsule" onclick={resetFlow}>Start Over</button>
+	{/if}
+
 	<div class="hero">
 		<!-- #Just for fun! speech bubble — upper left -->
 		<div class="floater tag-fun">
@@ -634,6 +649,42 @@
 
 	.consent-btn:hover {
 		opacity: 0.9;
+	}
+
+	.reset-capsule {
+		position: absolute;
+		top: 1rem;
+		left: 1rem;
+		z-index: 5;
+		border: none;
+		border-radius: 999px;
+		padding: 0.55rem 1.25rem;
+		font-family: 'Manrope', sans-serif;
+		font-size: 0.875rem;
+		font-weight: 500;
+		color: #111;
+		background: rgba(255, 255, 255, 0.92);
+		backdrop-filter: blur(4px);
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+		cursor: pointer;
+		opacity: 0;
+		animation: fade-in 220ms ease-out forwards;
+		transition: background-color 150ms;
+	}
+
+	.reset-capsule:hover {
+		background: #f5f5f5;
+	}
+
+	@keyframes fade-in {
+		from {
+			opacity: 0;
+			transform: translateY(-4px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
 	}
 
 	.success {
