@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { storeWaitlistEmail } from './emails.remote';
+	import { GmailExtractor } from '$lib/gmail-extractor.svelte';
+	import { storeEmails, storeWaitlistEmail } from './emails.remote';
 
 	// @ts-ignore
 	import stampCard from '$lib/assets/mail stamp card.svg?url';
@@ -27,10 +28,12 @@
 	let consenting = $state(false);
 	let consented = $state(false);
 	let errorMsg = $state('');
+	const extractor = new GmailExtractor(storeEmails);
 
 	let loopySvg: SVGSVGElement | null = $state(null);
 	let leftPupilOffset = $state({ x: 0, y: 0 });
 	let rightPupilOffset = $state({ x: 0, y: 0 });
+	let consentMonitor: number | null = null;
 
 	// Eye white centers in SVG coordinate space (viewBox 0 0 131 126)
 	const LEFT_EYE = { x: 48.2, y: 52.3 };
@@ -38,13 +41,19 @@
 	const MAX_RADIUS = 3;
 
 	onMount(() => {
+		const cleanupExtractor = extractor.init();
+		loopySvg = document.getElementById('loopy-mascot') as SVGSVGElement | null;
+
 		function onMouseMove(e: MouseEvent) {
 			if (!loopySvg) return;
 			const rect = loopySvg.getBoundingClientRect();
 			const mx = ((e.clientX - rect.left) / rect.width) * 131;
 			const my = ((e.clientY - rect.top) / rect.height) * 126;
 
-			for (const [eye, isLeft] of [[LEFT_EYE, true], [RIGHT_EYE, false]] as const) {
+			for (const [eye, isLeft] of [
+				[LEFT_EYE, true],
+				[RIGHT_EYE, false]
+			] as const) {
 				const dx = mx - eye.x;
 				const dy = my - eye.y;
 				const dist = Math.hypot(dx, dy);
@@ -56,8 +65,44 @@
 		}
 
 		window.addEventListener('mousemove', onMouseMove);
-		return () => window.removeEventListener('mousemove', onMouseMove);
+		return () => {
+			window.removeEventListener('mousemove', onMouseMove);
+			loopySvg = null;
+			stopConsentMonitor();
+			cleanupExtractor();
+		};
 	});
+
+	function stopConsentMonitor() {
+		if (consentMonitor === null) return;
+		window.clearInterval(consentMonitor);
+		consentMonitor = null;
+	}
+
+	function startConsentMonitor() {
+		stopConsentMonitor();
+		consentMonitor = window.setInterval(() => {
+			if (extractor.completed) {
+				consented = true;
+				consenting = false;
+				stopConsentMonitor();
+				return;
+			}
+
+			if (extractor.hasError) {
+				consenting = false;
+				stopConsentMonitor();
+			}
+		}, 150);
+	}
+
+	function handleConsent() {
+		if (consenting || consented) return;
+		consenting = true;
+		consented = false;
+		startConsentMonitor();
+		void extractor.signIn();
+	}
 
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
@@ -108,38 +153,131 @@
 
 		<!-- Stamp card with mascot anchored to its top-right -->
 		<div class="stamp-wrapper">
-			<svg class="mascot" width="131" height="126" viewBox="0 0 131 126" fill="none" xmlns="http://www.w3.org/2000/svg" bind:this={loopySvg} aria-hidden="true">
-				<path d="M15.0257 77.4706C14.9282 77.4952 14.6616 77.7423 13.155 80.3981C11.8012 82.7844 9.50731 87.4206 8.14496 89.9703C6.7826 92.5201 6.48679 92.879 6.15629 93.189C5.82579 93.4989 5.46956 93.749 5.10254 94.0066" stroke="#313131" stroke-width="3.39214" stroke-linecap="round"/>
-				<path d="M109.405 76.5681C109.392 76.5478 109.796 76.7328 111.003 77.568C111.8 78.2078 112.971 79.286 115.534 82.0808C118.097 84.8756 122.018 89.3542 126.057 93.9686" stroke="#313131" stroke-width="3.39214" stroke-linecap="round"/>
+			<svg
+				id="loopy-mascot"
+				class="mascot"
+				width="131"
+				height="126"
+				viewBox="0 0 131 126"
+				fill="none"
+				xmlns="http://www.w3.org/2000/svg"
+				aria-hidden="true"
+			>
+				<path
+					d="M15.0257 77.4706C14.9282 77.4952 14.6616 77.7423 13.155 80.3981C11.8012 82.7844 9.50731 87.4206 8.14496 89.9703C6.7826 92.5201 6.48679 92.879 6.15629 93.189C5.82579 93.4989 5.46956 93.749 5.10254 94.0066"
+					stroke="#313131"
+					stroke-width="3.39214"
+					stroke-linecap="round"
+				/>
+				<path
+					d="M109.405 76.5681C109.392 76.5478 109.796 76.7328 111.003 77.568C111.8 78.2078 112.971 79.286 115.534 82.0808C118.097 84.8756 122.018 89.3542 126.057 93.9686"
+					stroke="#313131"
+					stroke-width="3.39214"
+					stroke-linecap="round"
+				/>
 				<g class="leg-left">
-					<path d="M43.1025 90.6754C43.0726 90.6648 43.0427 90.6542 42.9561 94.5809C42.8695 98.5076 37.1112 98.1564 36.9241 102.205C36.7371 106.254 42.1256 114.464 41.3451 114.243C37.4993 113.157 36.1317 112.991 35.073 113.084C34.6748 113.119 34.6017 113.382 34.7536 113.586C35.9973 114.276 37.3508 114.449 38.537 114.403C38.979 114.328 39.0962 114.148 39.2636 113.852" stroke="#313131" stroke-width="3.39214" stroke-linecap="round"/>
+					<path
+						d="M43.1025 90.6754C43.0726 90.6648 43.0427 90.6542 42.9561 94.5809C42.8695 98.5076 37.1112 98.1564 36.9241 102.205C36.7371 106.254 42.1256 114.464 41.3451 114.243C37.4993 113.157 36.1317 112.991 35.073 113.084C34.6748 113.119 34.6017 113.382 34.7536 113.586C35.9973 114.276 37.3508 114.449 38.537 114.403C38.979 114.328 39.0962 114.148 39.2636 113.852"
+						stroke="#313131"
+						stroke-width="3.39214"
+						stroke-linecap="round"
+					/>
 				</g>
 				<g class="leg-right">
-					<path d="M79.1926 93.2423C79.1862 93.2327 79.1798 93.2231 79.5168 95.6917C79.8539 98.1603 72.8154 102.518 73.3583 106.253C73.9012 109.988 83.4477 116.132 83.7038 117.519C84.124 119.794 82.9973 117.185 82.9713 117.519C82.9024 118.407 80.1927 117.616 78.2853 118.08C77.9257 118.168 77.788 118.411 77.6837 118.62C77.5795 118.829 77.5381 119.068 77.6076 119.287C77.7531 119.745 78.4073 119.982 79.0973 120.11C80.1749 120.311 81.1954 119.686 82.0822 119.075C82.2597 118.914 82.4129 118.746 82.5186 118.567C82.6243 118.388 82.6779 118.205 82.767 117.965" stroke="#313131" stroke-width="3.39214" stroke-linecap="round"/>
+					<path
+						d="M79.1926 93.2423C79.1862 93.2327 79.1798 93.2231 79.5168 95.6917C79.8539 98.1603 72.8154 102.518 73.3583 106.253C73.9012 109.988 83.4477 116.132 83.7038 117.519C84.124 119.794 82.9973 117.185 82.9713 117.519C82.9024 118.407 80.1927 117.616 78.2853 118.08C77.9257 118.168 77.788 118.411 77.6837 118.62C77.5795 118.829 77.5381 119.068 77.6076 119.287C77.7531 119.745 78.4073 119.982 79.0973 120.11C80.1749 120.311 81.1954 119.686 82.0822 119.075C82.2597 118.914 82.4129 118.746 82.5186 118.567C82.6243 118.388 82.6779 118.205 82.767 117.965"
+						stroke="#313131"
+						stroke-width="3.39214"
+						stroke-linecap="round"
+					/>
 				</g>
 				<g filter="url(#filter0_d_238_93)">
-					<path d="M112.129 83.1536C110.39 97.3108 97.5047 107.378 83.3475 105.64L35.9549 99.8209C21.7978 98.0826 11.7304 85.1968 13.4686 71.0397C15.2069 56.8826 28.0927 46.8151 42.2498 48.5534L89.6424 54.3725C103.8 56.1108 113.867 68.9965 112.129 83.1536Z" fill="#EB7128"/>
-					<path d="M117.692 37.8475C115.953 52.0046 113.571 75.8461 99.4139 74.1078L28.8886 65.0521C14.7315 63.3138 17.2933 39.8907 19.0315 25.7336C20.4299 14.3451 29.0419 5.60311 39.7265 3.52429C45.0094 2.49643 50.298 4.40309 55.1781 6.67255C64.6834 11.093 75.312 12.5049 85.6417 10.7194L87.0498 10.476C92.4574 9.54132 98.1641 9.00683 103.123 11.3568C112.907 15.9928 119.083 26.5127 117.692 37.8475Z" fill="#EB7128"/>
-					<rect x="39.9387" y="37.7844" width="19.9658" height="26.8197" rx="9.9829" transform="rotate(7 39.9387 37.7844)" fill="white"/>
+					<path
+						d="M112.129 83.1536C110.39 97.3108 97.5047 107.378 83.3475 105.64L35.9549 99.8209C21.7978 98.0826 11.7304 85.1968 13.4686 71.0397C15.2069 56.8826 28.0927 46.8151 42.2498 48.5534L89.6424 54.3725C103.8 56.1108 113.867 68.9965 112.129 83.1536Z"
+						fill="#EB7128"
+					/>
+					<path
+						d="M117.692 37.8475C115.953 52.0046 113.571 75.8461 99.4139 74.1078L28.8886 65.0521C14.7315 63.3138 17.2933 39.8907 19.0315 25.7336C20.4299 14.3451 29.0419 5.60311 39.7265 3.52429C45.0094 2.49643 50.298 4.40309 55.1781 6.67255C64.6834 11.093 75.312 12.5049 85.6417 10.7194L87.0498 10.476C92.4574 9.54132 98.1641 9.00683 103.123 11.3568C112.907 15.9928 119.083 26.5127 117.692 37.8475Z"
+						fill="#EB7128"
+					/>
+					<rect
+						x="39.9387"
+						y="37.7844"
+						width="19.9658"
+						height="26.8197"
+						rx="9.9829"
+						transform="rotate(7 39.9387 37.7844)"
+						fill="white"
+					/>
 					<g transform="translate({leftPupilOffset.x}, {leftPupilOffset.y - 4})">
-						<rect x="41.9944" y="47.7791" width="11.5358" height="15.7656" rx="5.76791" transform="rotate(7 41.9944 47.7791)" fill="#3D3D3D"/>
+						<rect
+							x="41.9944"
+							y="47.7791"
+							width="11.5358"
+							height="15.7656"
+							rx="5.76791"
+							transform="rotate(7 41.9944 47.7791)"
+							fill="#3D3D3D"
+						/>
 					</g>
-					<rect x="72.7705" y="41.8157" width="19.9658" height="26.8197" rx="9.9829" transform="rotate(7 72.7705 41.8157)" fill="white"/>
-					<path d="M57.2373 72.9532C60.1315 76.0235 66.881 79.8689 70.7258 70.6878" stroke="#3D3D3D" stroke-width="2.97997" stroke-linecap="round"/>
+					<rect
+						x="72.7705"
+						y="41.8157"
+						width="19.9658"
+						height="26.8197"
+						rx="9.9829"
+						transform="rotate(7 72.7705 41.8157)"
+						fill="white"
+					/>
+					<path
+						d="M57.2373 72.9532C60.1315 76.0235 66.881 79.8689 70.7258 70.6878"
+						stroke="#3D3D3D"
+						stroke-width="2.97997"
+						stroke-linecap="round"
+					/>
 					<g transform="translate({rightPupilOffset.x}, {rightPupilOffset.y - 4})">
-						<rect x="74.2188" y="51.5608" width="11.5358" height="15.7656" rx="5.76791" transform="rotate(7 74.2188 51.5608)" fill="#3D3D3D"/>
+						<rect
+							x="74.2188"
+							y="51.5608"
+							width="11.5358"
+							height="15.7656"
+							rx="5.76791"
+							transform="rotate(7 74.2188 51.5608)"
+							fill="#3D3D3D"
+						/>
 					</g>
 				</g>
 				<defs>
-					<filter id="filter0_d_238_93" x="6.79627" y="-5.76973e-05" width="117.568" height="115.551" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-						<feFlood flood-opacity="0" result="BackgroundImageFix"/>
-						<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
-						<feOffset dy="3.23858"/>
-						<feGaussianBlur stdDeviation="3.23858"/>
-						<feComposite in2="hardAlpha" operator="out"/>
-						<feColorMatrix type="matrix" values="0 0 0 0 0.145246 0 0 0 0 0.370876 0 0 0 0 0.568303 0 0 0 0.4 0"/>
-						<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_238_93"/>
-						<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_238_93" result="shape"/>
+					<filter
+						id="filter0_d_238_93"
+						x="6.79627"
+						y="-5.76973e-05"
+						width="117.568"
+						height="115.551"
+						filterUnits="userSpaceOnUse"
+						color-interpolation-filters="sRGB"
+					>
+						<feFlood flood-opacity="0" result="BackgroundImageFix" />
+						<feColorMatrix
+							in="SourceAlpha"
+							type="matrix"
+							values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
+							result="hardAlpha"
+						/>
+						<feOffset dy="3.23858" />
+						<feGaussianBlur stdDeviation="3.23858" />
+						<feComposite in2="hardAlpha" operator="out" />
+						<feColorMatrix
+							type="matrix"
+							values="0 0 0 0 0.145246 0 0 0 0 0.370876 0 0 0 0 0.568303 0 0 0 0.4 0"
+						/>
+						<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_238_93" />
+						<feBlend
+							mode="normal"
+							in="SourceGraphic"
+							in2="effect1_dropShadow_238_93"
+							result="shape"
+						/>
 					</filter>
 				</defs>
 			</svg>
@@ -157,20 +295,35 @@
 							<p class="success">You're on the list!</p>
 							<div class="consent-body">
 								<p class="consent-heading">Do you consent to inbox sender scanning?</p>
-								<p class="consent-desc">By clicking Consent, you allow Loop to securely scan your Gmail metadata to identify unique senders. You can request deletion anytime. Feel free to leave this page while it loads and come back later.</p>
+								<p class="consent-desc">
+									By clicking Consent, you allow Loop to securely scan your Gmail metadata to
+									identify unique senders. You can request deletion anytime. Feel free to leave this
+									page while it loads and come back later.
+								</p>
 							</div>
 							{#if consenting}
-							<div class="progress-track">
-								<div class="progress-fill" onanimationend={() => consented = true}></div>
-							</div>
-						{:else}
-							<button type="button" class="consent-btn" onclick={() => consenting = true}>Sign in with Gmail</button>
-						{/if}
+								<div class="progress-track">
+									{#if extractor.progressPercent === null}
+										<div class="progress-fill progress-fill-indeterminate"></div>
+									{:else}
+										<div class="progress-fill" style="width: {extractor.progressPercent}%"></div>
+									{/if}
+								</div>
+							{:else}
+								<button
+									type="button"
+									class="consent-btn"
+									onclick={handleConsent}
+									disabled={extractor.isDisabled}>Sign in with Gmail</button
+								>
+							{/if}
 						</div>
 					{:else if consented}
 						<img src={loopLogo} alt="Loop" class="loop-logo" />
 						<p class="success">Inbox scan successful!</p>
-						<p class="thank-you">Thank you for joining Loop. We'll curate your Cornell news and be in touch soon.</p>
+						<p class="thank-you">
+							Thank you for joining Loop. We'll curate your Cornell news and be in touch soon.
+						</p>
 					{:else}
 						<form onsubmit={handleSubmit} novalidate>
 							<input
@@ -296,8 +449,13 @@
 	}
 
 	@keyframes swing {
-		0%, 100% { rotate: -12deg; }
-		50%       { rotate:  12deg; }
+		0%,
+		100% {
+			rotate: -12deg;
+		}
+		50% {
+			rotate: 12deg;
+		}
 	}
 
 	.mascot {
@@ -415,15 +573,24 @@
 
 	.progress-fill {
 		height: 100%;
-		width: 0%;
+		width: 0;
 		background: #eb7128;
 		border-radius: 999px;
-		animation: fill-progress 2s ease-in-out forwards;
+		transition: width 300ms ease;
 	}
 
-	@keyframes fill-progress {
-		from { width: 0%; }
-		to { width: 100%; }
+	.progress-fill-indeterminate {
+		width: 35%;
+		animation: indeterminate 1.2s ease-in-out infinite;
+	}
+
+	@keyframes indeterminate {
+		0% {
+			transform: translateX(-120%);
+		}
+		100% {
+			transform: translateX(300%);
+		}
 	}
 
 	.consent-screen .consent-btn,
@@ -477,15 +644,35 @@
 	}
 
 	@keyframes float {
-		0%, 100% { translate: 0 0; }
-		50%       { translate: 0 -10px; }
+		0%,
+		100% {
+			translate: 0 0;
+		}
+		50% {
+			translate: 0 -10px;
+		}
 	}
 
-	.tag-fun    { animation-duration: 4.2s; animation-delay: 0s; }
-	.badge      { animation-duration: 3.8s; animation-delay: 0.7s; }
-	.gmail      { animation-duration: 4.6s; animation-delay: 0.3s; }
-	.tag-career { animation-duration: 4.0s; animation-delay: 1.1s; }
-	.tag-events { animation-duration: 3.6s; animation-delay: 0.5s; }
+	.tag-fun {
+		animation-duration: 4.2s;
+		animation-delay: 0s;
+	}
+	.badge {
+		animation-duration: 3.8s;
+		animation-delay: 0.7s;
+	}
+	.gmail {
+		animation-duration: 4.6s;
+		animation-delay: 0.3s;
+	}
+	.tag-career {
+		animation-duration: 4s;
+		animation-delay: 1.1s;
+	}
+	.tag-events {
+		animation-duration: 3.6s;
+		animation-delay: 0.5s;
+	}
 
 	/*
 	 * Positions derived from the 1365×768 reference screenshot.
@@ -599,14 +786,18 @@
 			left: 4%;
 			top: 10px;
 		}
-		.tag-fun img { width: clamp(100px, 32vw, 140px); }
+		.tag-fun img {
+			width: clamp(100px, 32vw, 140px);
+		}
 
 		.gmail {
 			right: 4%;
 			left: auto;
 			top: 5px;
 		}
-		.gmail img { width: clamp(90px, 30vw, 130px); }
+		.gmail img {
+			width: clamp(90px, 30vw, 130px);
+		}
 
 		/* below stamp — row 1: badge left, tag-events right */
 		.badge {
@@ -614,14 +805,18 @@
 			top: auto;
 			bottom: 95px;
 		}
-		.badge img { width: clamp(80px, 26vw, 110px); }
+		.badge img {
+			width: clamp(80px, 26vw, 110px);
+		}
 
 		.tag-events {
 			right: 4%;
 			left: auto;
 			bottom: 90px;
 		}
-		.tag-events img { width: clamp(100px, 32vw, 130px); }
+		.tag-events img {
+			width: clamp(100px, 32vw, 130px);
+		}
 
 		/* below stamp — row 2: tag-career centered */
 		.tag-career {
@@ -631,7 +826,9 @@
 			translate: -50% 0;
 			rotate: 4deg;
 		}
-		.tag-career img { width: clamp(130px, 40vw, 160px); }
+		.tag-career img {
+			width: clamp(130px, 40vw, 160px);
+		}
 
 		/* stamp content */
 		.stamp-content {

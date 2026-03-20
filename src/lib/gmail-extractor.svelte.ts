@@ -89,6 +89,8 @@ export class GmailExtractor {
 
 	status = $state('Loading Google sign-in...');
 	isWorking = $state(false);
+	completed = $state(false);
+	hasError = $state(false);
 	scannedMessages = $state(0);
 	estimatedTotalMessages = $state<number | null>(null);
 
@@ -152,8 +154,11 @@ export class GmailExtractor {
 
 	async signIn(): Promise<void> {
 		if (this.isWorking) return;
+		this.completed = false;
+		this.hasError = false;
 
 		if (!this.#tokenClient) {
+			this.hasError = true;
 			this.status = 'Google sign-in is still loading.';
 			return;
 		}
@@ -164,12 +169,14 @@ export class GmailExtractor {
 
 	async #handleTokenResponse(response: TokenResponse): Promise<void> {
 		if (response.error) {
+			this.hasError = true;
 			this.status = `Google sign-in failed: ${response.error_description ?? response.error}`;
 			return;
 		}
 
 		const accessToken = response.access_token;
 		if (!accessToken) {
+			this.hasError = true;
 			this.status = 'Google sign-in returned no access token.';
 			return;
 		}
@@ -182,9 +189,11 @@ export class GmailExtractor {
 		try {
 			const { ownEmail, uniqueSenders } = await this.#collectAndUpload(accessToken);
 			console.log('Your email:', ownEmail);
+			this.completed = true;
 			this.status = `Done. Thank you!\nFound and uploaded ${uniqueSenders.toLocaleString()} unique senders.`;
 		} catch (error) {
 			console.error(error);
+			this.hasError = true;
 			this.status = `Stopped due to a non-retryable error:\n${formatUserFacingError(error)}`;
 		} finally {
 			this.isWorking = false;
@@ -240,7 +249,10 @@ export class GmailExtractor {
 
 				processed += batch.length;
 				this.scannedMessages = processed;
-				if (this.estimatedTotalMessages !== null && this.scannedMessages > this.estimatedTotalMessages) {
+				if (
+					this.estimatedTotalMessages !== null &&
+					this.scannedMessages > this.estimatedTotalMessages
+				) {
 					this.estimatedTotalMessages = this.scannedMessages;
 				}
 
