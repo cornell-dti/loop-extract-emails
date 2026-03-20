@@ -42,6 +42,13 @@
 	let rightPupilOffset = $state({ x: 0, y: 0 });
 	let consentMonitor: number | null = null;
 
+	// RAF-based progress animation.
+	// displayedProgress drives the bar width. null = show indeterminate sliding bar.
+	// Once we have real data it smoothly animates toward an extrapolated target,
+	// keeping the bar always visibly moving even between batches and during rate limiting.
+	let displayedProgress = $state<number | null>(null);
+	let animFrameId: number | null = null;
+
 	export const snapshot: Snapshot<ConsentSnapshot> = {
 		capture: () => ({
 			email,
@@ -90,6 +97,7 @@
 			window.removeEventListener('mousemove', onMouseMove);
 			loopySvg = null;
 			stopConsentMonitor();
+			stopProgressAnimation();
 			cleanupExtractor();
 		};
 	});
@@ -98,6 +106,67 @@
 		if (consentMonitor === null) return;
 		window.clearInterval(consentMonitor);
 		consentMonitor = null;
+	}
+
+	function startProgressAnimation() {
+		stopProgressAnimation();
+
+		// Animation state — plain vars, not reactive (only displayedProgress is $state)
+		let animTarget = 0;
+		let lastRealPercent = -1;
+		let lastRealTime = performance.now();
+		let ratePerMs = 0; // measured scan rate in % per ms
+
+		function tick(now: DOMHighResTimeStamp) {
+			const real = extractor.progressPercent;
+
+			// Stay indeterminate until we receive the first real percentage
+			if (real === null) {
+				animFrameId = requestAnimationFrame(tick);
+				return;
+			}
+
+			// First real value: initialise displayed at 0 and start animating up
+			if (displayedProgress === null) {
+				displayedProgress = 0;
+				animTarget = real;
+				lastRealPercent = real;
+				lastRealTime = now;
+			}
+
+			// Real progress advanced → measure rate, set extrapolated target
+			if (real > lastRealPercent) {
+				const dt = now - lastRealTime;
+				if (dt > 0) ratePerMs = (real - lastRealPercent) / dt;
+				lastRealPercent = real;
+				lastRealTime = now;
+				// Extrapolate ~2 batches ahead so the bar keeps moving between updates
+				animTarget = Math.min(real + ratePerMs * 1200, 99);
+			}
+
+			// Decaying creep during stalls (rate limiting, auth wait, etc.)
+			// Starts at ~0.5 %/s and halves every 10 s → total max overshoot ~5 %
+			const stalledMs = now - lastRealTime;
+			if (stalledMs > 1500 && extractor.isWorking) {
+				const decayFactor = Math.exp(-stalledMs / 10000);
+				animTarget = Math.min(animTarget + (0.5 * decayFactor) / 60, 99);
+			}
+
+			// Smooth lerp toward target — bar can go slightly backwards if target drops
+			const diff = animTarget - displayedProgress;
+			displayedProgress = displayedProgress + diff * 0.08;
+
+			animFrameId = requestAnimationFrame(tick);
+		}
+
+		animFrameId = requestAnimationFrame(tick);
+	}
+
+	function stopProgressAnimation() {
+		if (animFrameId !== null) {
+			cancelAnimationFrame(animFrameId);
+			animFrameId = null;
+		}
 	}
 
 	function startConsentMonitor() {
@@ -121,12 +190,16 @@
 		if (consenting || consented) return;
 		consenting = true;
 		consented = false;
+		displayedProgress = null;
 		startConsentMonitor();
+		startProgressAnimation();
 		void extractor.signIn();
 	}
 
 	function resetFlow() {
 		stopConsentMonitor();
+		stopProgressAnimation();
+		displayedProgress = null;
 		email = '';
 		submitting = false;
 		submitted = false;
@@ -328,31 +401,43 @@
 					{#if submitted && !consented}
 						<div class="consent-screen">
 							<img src={loopLogo} alt="Loop" class="loop-logo" />
-							<p class="success">You're on the list!</p>
-							<div class="consent-body">
-								<p class="consent-heading">Do you consent to inbox sender scanning?</p>
-								<p class="consent-desc">
-									By clicking Consent, you allow Loop to securely scan your Gmail metadata to
-									identify unique senders. You can request deletion anytime. Feel free to leave this
-									page while it loads and come back later.
-								</p>
-							</div>
-							{#if consenting}
-								<div class="progress-track">
-									{#if extractor.progressPercent === null}
-										<div class="progress-fill progress-fill-indeterminate"></div>
-									{:else}
-										<div class="progress-fill" style="width: {extractor.progressPercent}%"></div>
+							<p class="success">{consenting ? 'Scanning your inbox\u2026' : "You're on the list!"}</p>
+							<div class="consent-variable">
+								{#if consenting}
+									{#if extractor.estimatedTotalMessages !== null || extractor.scannedMessages > 0}
+										<div class="scan-counter">
+											<span class="scan-num">{extractor.scannedMessages.toLocaleString()}</span>{#if extractor.estimatedTotalMessages}<span class="scan-denom">&thinsp;/&thinsp;~{extractor.estimatedTotalMessages.toLocaleString()}</span>{/if}
+										</div>
 									{/if}
-								</div>
-							{:else}
-								<button
-									type="button"
-									class="consent-btn"
-									onclick={handleConsent}
-									disabled={extractor.isDisabled}>Sign in with Gmail</button
-								>
-							{/if}
+								{:else}
+									<div class="consent-body">
+										<p class="consent-heading">Do you consent to inbox sender scanning?</p>
+										<p class="consent-desc">
+											By clicking Consent, you allow Loop to securely scan your Gmail metadata to store
+											unique sender emails. No other information is collected. Scanning will take a few
+											minutes.
+										</p>
+									</div>
+								{/if}
+							</div>
+							<div class="consent-action">
+								{#if consenting}
+									<div class="progress-track">
+										{#if displayedProgress === null}
+											<div class="progress-fill progress-fill-indeterminate"></div>
+										{:else}
+											<div class="progress-fill" style="width: {displayedProgress}%"></div>
+										{/if}
+									</div>
+								{:else}
+									<button
+										type="button"
+										class="consent-btn"
+										onclick={handleConsent}
+										disabled={extractor.isDisabled}>Sign in with Gmail</button
+									>
+								{/if}
+							</div>
 						</div>
 					{:else if consented}
 						<img src={loopLogo} alt="Loop" class="loop-logo" />
@@ -574,6 +659,52 @@
 		align-items: center;
 		gap: 0.35rem;
 		transform: translateY(4%);
+		width: 100%;
+	}
+
+	.consent-variable {
+		width: 100%;
+		min-height: 4.5rem;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.3rem;
+		text-align: center;
+	}
+
+	.scan-counter {
+		display: flex;
+		align-items: baseline;
+		line-height: 1;
+	}
+
+	.scan-num {
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: #eb7128;
+	}
+
+	.scan-denom {
+		font-size: 0.9rem;
+		font-weight: 500;
+		color: #00304e;
+		opacity: 0.6;
+	}
+
+	.consent-action {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		margin-top: 0.15rem;
+	}
+
+	.consent-action > .progress-track {
+		width: 100%;
+	}
+
+	.consent-action > .consent-btn {
+		width: 100%;
 	}
 
 	.consent-body {
@@ -612,7 +743,7 @@
 		width: 0;
 		background: #eb7128;
 		border-radius: 999px;
-		transition: width 300ms ease;
+		/* No CSS transition — the RAF animation loop provides all easing */
 	}
 
 	.progress-fill-indeterminate {
@@ -627,11 +758,6 @@
 		100% {
 			transform: translateX(300%);
 		}
-	}
-
-	.consent-screen .consent-btn,
-	.consent-screen .progress-track {
-		margin-top: 0.6rem;
 	}
 
 	.consent-btn {
