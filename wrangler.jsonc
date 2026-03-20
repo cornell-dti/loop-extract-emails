@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "loop-extract-emails",
+	"name": "loop-waitlist",
 	"compatibility_date": "2026-02-20",
 	"compatibility_flags": ["nodejs_als"],
 	"account_id": "b287c94b13bd9617c8a7d2498ffcf8c2",
