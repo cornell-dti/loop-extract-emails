@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { GmailExtractor } from '$lib/gmail-extractor.svelte';
 	import { storeEmails, storeWaitlistEmail } from './emails.remote';
+	import type { Snapshot } from './$types';
 
 	// @ts-ignore
 	import stampCard from '$lib/assets/mail stamp card.svg?url';
@@ -22,6 +23,12 @@
 	// @ts-ignore
 	import background from '$lib/assets/background.png?url';
 
+	type ConsentSnapshot = {
+		email: string;
+		submitted: boolean;
+		consented: boolean;
+	};
+
 	let email = $state('');
 	let submitting = $state(false);
 	let submitted = $state(false);
@@ -34,6 +41,20 @@
 	let leftPupilOffset = $state({ x: 0, y: 0 });
 	let rightPupilOffset = $state({ x: 0, y: 0 });
 	let consentMonitor: number | null = null;
+
+	export const snapshot: Snapshot<ConsentSnapshot> = {
+		capture: () => ({
+			email,
+			submitted,
+			consented
+		}),
+		restore: (value) => {
+			email = value.email;
+			submitted = value.submitted;
+			consented = value.consented;
+			consenting = false;
+		}
+	};
 
 	// Eye white centers in SVG coordinate space (viewBox 0 0 131 126)
 	const LEFT_EYE = { x: 48.2, y: 52.3 };
