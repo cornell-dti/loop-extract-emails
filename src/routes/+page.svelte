@@ -332,9 +332,9 @@
 							<div class="consent-body">
 								<p class="consent-heading">Do you consent to inbox sender scanning?</p>
 								<p class="consent-desc">
-									By clicking Consent, you allow Loop to securely scan your Gmail metadata to
-									identify unique senders. You can request deletion anytime. Feel free to leave this
-									page while it loads and come back later.
+									By clicking Consent, you allow Loop to securely scan your Gmail metadata to store
+									unique sender emails. No other information is collected. Scanning will take a few
+									minutes.
 								</p>
 							</div>
 							{#if consenting}
