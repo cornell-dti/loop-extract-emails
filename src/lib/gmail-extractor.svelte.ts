@@ -18,6 +18,7 @@ type GoogleNamespace = {
 			initTokenClient: (config: {
 				client_id: string;
 				scope: string;
+				hosted_domain?: string;
 				callback: (response: TokenResponse) => void;
 			}) => TokenClient;
 		};
@@ -66,6 +67,7 @@ type StoreEmailsFn = (payload: StoreEmailsPayload) => Promise<unknown>;
 
 const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const GOOGLE_IDENTITY_SCRIPT = 'https://accounts.google.com/gsi/client';
+const GOOGLE_HOSTED_DOMAIN = 'cornell.edu';
 
 const BATCH_SIZE = 500;
 const GMAIL_BATCH_API_SIZE = 100;
@@ -89,6 +91,8 @@ export class GmailExtractor {
 
 	status = $state('Loading Google sign-in...');
 	isWorking = $state(false);
+	completed = $state(false);
+	hasError = $state(false);
 	scannedMessages = $state(0);
 	estimatedTotalMessages = $state<number | null>(null);
 
@@ -133,6 +137,7 @@ export class GmailExtractor {
 				this.#tokenClient = oauth2.initTokenClient({
 					client_id: this.#googleClientId!,
 					scope: GOOGLE_SCOPE,
+					hosted_domain: GOOGLE_HOSTED_DOMAIN,
 					callback: (response) => {
 						void this.#handleTokenResponse(response);
 					}
@@ -152,8 +157,11 @@ export class GmailExtractor {
 
 	async signIn(): Promise<void> {
 		if (this.isWorking) return;
+		this.completed = false;
+		this.hasError = false;
 
 		if (!this.#tokenClient) {
+			this.hasError = true;
 			this.status = 'Google sign-in is still loading.';
 			return;
 		}
@@ -162,14 +170,33 @@ export class GmailExtractor {
 		this.#tokenClient.requestAccessToken({ prompt: 'consent' });
 	}
 
+	reset(): void {
+		this.isWorking = false;
+		this.completed = false;
+		this.hasError = false;
+		this.scannedMessages = 0;
+		this.estimatedTotalMessages = null;
+
+		if (!this.#googleClientId) {
+			this.status = 'Missing PUBLIC_GOOGLE_CLIENT_ID. Add it to your environment and reload.';
+			return;
+		}
+
+		this.status = this.#tokenClient
+			? 'Ready. Click "Sign in with Google".'
+			: 'Loading Google sign-in...';
+	}
+
 	async #handleTokenResponse(response: TokenResponse): Promise<void> {
 		if (response.error) {
+			this.hasError = true;
 			this.status = `Google sign-in failed: ${response.error_description ?? response.error}`;
 			return;
 		}
 
 		const accessToken = response.access_token;
 		if (!accessToken) {
+			this.hasError = true;
 			this.status = 'Google sign-in returned no access token.';
 			return;
 		}
@@ -182,9 +209,11 @@ export class GmailExtractor {
 		try {
 			const { ownEmail, uniqueSenders } = await this.#collectAndUpload(accessToken);
 			console.log('Your email:', ownEmail);
+			this.completed = true;
 			this.status = `Done. Thank you!\nFound and uploaded ${uniqueSenders.toLocaleString()} unique senders.`;
 		} catch (error) {
 			console.error(error);
+			this.hasError = true;
 			this.status = `Stopped due to a non-retryable error:\n${formatUserFacingError(error)}`;
 		} finally {
 			this.isWorking = false;
@@ -240,7 +269,10 @@ export class GmailExtractor {
 
 				processed += batch.length;
 				this.scannedMessages = processed;
-				if (this.estimatedTotalMessages !== null && this.scannedMessages > this.estimatedTotalMessages) {
+				if (
+					this.estimatedTotalMessages !== null &&
+					this.scannedMessages > this.estimatedTotalMessages
+				) {
 					this.estimatedTotalMessages = this.scannedMessages;
 				}
 
