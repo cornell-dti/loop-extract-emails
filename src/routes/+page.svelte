@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { GmailExtractor } from '$lib/gmail-extractor.svelte';
-	import { storeEmails, storeWaitlistEmail } from './emails.remote';
+	import {
+		getEmailExtractionStatus,
+		startEmailExtraction,
+		storeWaitlistEmail
+	} from './emails.remote';
 	import type { Snapshot } from './$types';
 
 	// @ts-ignore
@@ -37,7 +41,7 @@
 	let consented = $state(false);
 	let consentError = $state('');
 	let errorMsg = $state('');
-	const extractor = new GmailExtractor(storeEmails);
+	const extractor = new GmailExtractor(startEmailExtraction, getEmailExtractionStatus);
 
 	let loopySvg: SVGSVGElement | null = $state(null);
 	let leftPupilOffset = $state({ x: 0, y: 0 });
