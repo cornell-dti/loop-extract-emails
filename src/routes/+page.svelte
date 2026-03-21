@@ -231,7 +231,7 @@
 
 <main style="background-image: url('{background}')">
 	{#if submitted}
-		<button type="button" class="reset-capsule" onclick={resetFlow}>Start Over</button>
+		<button type="button" class="reset-capsule" onclick={resetFlow}>Add another email</button>
 	{/if}
 
 	<div class="hero">
@@ -395,27 +395,40 @@
 				<div class="stamp-content">
 					{#if !submitted}
 						<img src={loopLogo} alt="Loop" class="loop-logo" />
-						<p class="tagline">Your Cornell news, curated.</p>
+						<p class="tagline">Less inbox, more Cornell.</p>
 					{/if}
 
 					{#if submitted && !consented}
 						<div class="consent-screen">
-							<img src={loopLogo} alt="Loop" class="loop-logo" />
-							<p class="success">{consenting ? 'Scanning your inbox\u2026' : "You're on the list!"}</p>
+							<p class="success">
+								{consenting ? 'Scanning your inbox\u2026' : "You're on the list!"}
+							</p>
+							{#if consenting}
+								<p class="scan-subtitle">Feel free to leave this running in the background.</p>
+							{/if}
 							<div class="consent-variable">
 								{#if consenting}
 									{#if extractor.estimatedTotalMessages !== null || extractor.scannedMessages > 0}
 										<div class="scan-counter">
-											<span class="scan-num">{extractor.scannedMessages.toLocaleString()}</span>{#if extractor.estimatedTotalMessages}<span class="scan-denom">&thinsp;/&thinsp;~{extractor.estimatedTotalMessages.toLocaleString()}</span>{/if}
+											<span class="scan-num">{extractor.scannedMessages.toLocaleString()}</span
+											>{#if extractor.estimatedTotalMessages}<span class="scan-denom"
+													>&thinsp;/&thinsp;~{extractor.estimatedTotalMessages.toLocaleString()}</span
+												>{/if}
 										</div>
+									{/if}
+									{#if extractor.estimatedTotalMessages !== null}
+										<p class="scan-fun-fact">
+											{extractor.estimatedTotalMessages > 5000
+												? 'Wow, you have a lot of emails!'
+												: 'Wow, so few emails!'}
+										</p>
 									{/if}
 								{:else}
 									<div class="consent-body">
-										<p class="consent-heading">Do you consent to inbox sender scanning?</p>
+										<p class="consent-heading">While you wait, help us build Loop?</p>
 										<p class="consent-desc">
-											By clicking Consent, you allow Loop to securely scan your Gmail metadata to store
-											unique sender emails. No other information is collected. Scanning will take a few
-											minutes.
+											Help us figure out what's out there! We'll take a quick peek at your Gmail
+											senders to map the listserv landscape — sender info only, never email content.
 										</p>
 									</div>
 								{/if}
@@ -440,11 +453,12 @@
 							</div>
 						</div>
 					{:else if consented}
-						<img src={loopLogo} alt="Loop" class="loop-logo" />
-						<p class="success">Inbox scan successful!</p>
-						<p class="thank-you">
-							Thank you for joining Loop. We'll curate your Cornell news and be in touch soon.
-						</p>
+						<div class="consented-content">
+							<p class="success">Inbox scan successful!</p>
+							<p class="thank-you">
+								Thank you for joining the waitlist for Loop. We'll be in touch soon!
+							</p>
+						</div>
 					{:else}
 						<form onsubmit={handleSubmit} novalidate>
 							<input
@@ -596,6 +610,8 @@
 
 	.tagline {
 		margin: 0;
+		margin-top: -0.4rem;
+		margin-bottom: 0.35rem;
 		font-size: 0.95rem;
 		font-weight: 500;
 		color: rgba(0, 0, 0, 0.55);
@@ -603,7 +619,7 @@
 
 	form {
 		display: flex;
-		gap: 4px;
+		gap: 10px;
 		width: 100%;
 	}
 
@@ -696,7 +712,7 @@
 		width: 100%;
 		display: flex;
 		align-items: center;
-		margin-top: 0.15rem;
+		margin-top: 0.65rem;
 	}
 
 	.consent-action > .progress-track {
@@ -815,9 +831,31 @@
 
 	.success {
 		margin: 0;
-		font-size: 1rem;
+		font-size: 1.5rem;
 		font-weight: 600;
 		color: #eb7128;
+	}
+
+	.scan-subtitle {
+		margin: 0;
+		font-size: 0.75rem;
+		color: rgba(0, 0, 0, 0.45);
+	}
+
+	.scan-fun-fact {
+		margin: 0;
+		font-size: 0.75rem;
+		font-weight: 500;
+		color: rgba(0, 0, 0, 0.55);
+	}
+
+	.consented-content {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.5rem;
+		text-align: center;
+		margin-top: 1.5rem;
 	}
 
 	.thank-you {
