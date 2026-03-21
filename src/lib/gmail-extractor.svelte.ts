@@ -44,6 +44,7 @@ const GOOGLE_HOSTED_DOMAIN = 'cornell.edu';
 
 const STATUS_POLL_INTERVAL_MS = 1500;
 const ACTIVE_JOB_STORAGE_KEY = 'loop_extract_emails_active_job';
+const MAX_STATUS_ERRORS_BEFORE_RESET = 6;
 
 export class GmailExtractor {
 	readonly #startEmailExtraction: StartEmailExtractionFn;
@@ -53,6 +54,7 @@ export class GmailExtractor {
 	#statusPollTimer: number | null = null;
 	#activeJobId: string | null = null;
 	#activeJobKey: string | null = null;
+	#statusErrorCount = 0;
 
 	status = $state('Loading Google sign-in...');
 	isWorking = $state(false);
@@ -157,6 +159,7 @@ export class GmailExtractor {
 	reset(): void {
 		this.#stopPolling();
 		this.#clearActiveJob();
+		this.#statusErrorCount = 0;
 		this.isWorking = false;
 		this.completed = false;
 		this.hasError = false;
@@ -189,6 +192,7 @@ export class GmailExtractor {
 
 		this.#stopPolling();
 		this.#clearActiveJob();
+		this.#statusErrorCount = 0;
 		this.scannedMessages = 0;
 		this.estimatedTotalMessages = null;
 		this.isWorking = true;
@@ -271,15 +275,24 @@ export class GmailExtractor {
 				jobId: this.#activeJobId,
 				jobKey: this.#activeJobKey
 			});
-		} catch (err) {
-			const status = getErrorStatusCode(err);
-			if (status === 404 || status === 403) {
+			this.#statusErrorCount = 0;
+		} catch (error) {
+			this.#statusErrorCount += 1;
+			const statusCode = getErrorStatusCode(error);
+			const isPermanentError =
+				statusCode === 404 ||
+				statusCode === 403 ||
+				this.#statusErrorCount >= MAX_STATUS_ERRORS_BEFORE_RESET;
+			if (isPermanentError) {
 				this.#stopPolling();
 				this.#clearActiveJob();
+				this.#statusErrorCount = 0;
 				this.isWorking = false;
+				this.completed = false;
+				this.hasError = false;
 				this.status = 'Ready. Click "Sign in with Google".';
 			}
-			throw err;
+			throw error;
 		}
 
 		this.scannedMessages = result.scannedMessages;

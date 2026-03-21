@@ -65,7 +65,8 @@
 			email = value.email;
 			submitted = value.submitted;
 			consented = value.consented;
-			consenting = false;
+			// Do not reset consenting here — the consent monitor and extractor state own it.
+			// Forcing it to false would override the progress screen on reload.
 		}
 	};
 
@@ -76,6 +77,15 @@
 
 	onMount(() => {
 		const cleanupExtractor = extractor.init();
+		// Always start the consent monitor — it safely no-ops when there's nothing to do.
+		// We can't guard on `submitted` here because the snapshot may restore it after onMount.
+		if (extractor.isWorking) {
+			// extractor.init() synchronously sets isWorking = true for persisted jobs,
+			// so we can show the progress screen immediately without waiting for a monitor tick.
+			consenting = true;
+			startProgressAnimation();
+		}
+		startConsentMonitor();
 		loopySvg = document.getElementById('loopy-mascot') as SVGSVGElement | null;
 
 		function onMouseMove(e: MouseEvent) {
@@ -178,10 +188,16 @@
 	function startConsentMonitor() {
 		stopConsentMonitor();
 		consentMonitor = window.setInterval(() => {
+			if (extractor.isWorking) {
+				consenting = true;
+				if (animFrameId === null) startProgressAnimation();
+			}
+
 			if (extractor.completed) {
 				consented = true;
 				consenting = false;
 				awaitingAuth = false;
+				stopProgressAnimation();
 				stopConsentMonitor();
 				return;
 			}

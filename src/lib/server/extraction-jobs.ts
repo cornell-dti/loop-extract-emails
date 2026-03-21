@@ -7,7 +7,7 @@ const GMAIL_BATCH_ENDPOINT = 'https://www.googleapis.com/batch/gmail/v1';
 const EMAIL_BATCH_SIZE = 50;
 const GMAIL_BATCH_API_SIZE = 100;
 const MESSAGES_PER_PAGE = 500;
-const PAGES_PER_STEP = 2;
+const PAGES_PER_STEP = 1;
 
 const RETRY_BASE_DELAY_MS = 1000;
 const RETRY_MAX_DELAY_MS = 30_000;
