@@ -4,7 +4,8 @@
       "Bash(python3:*)",
       "mcp__figma__get_design_context",
       "mcp__svelte__svelte-autofixer",
-      "mcp__claude_ai_Figma__get_design_context"
+      "mcp__claude_ai_Figma__get_design_context",
+      "Bash(pnpm check:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

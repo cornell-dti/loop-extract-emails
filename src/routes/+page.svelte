@@ -32,8 +32,10 @@
 	let email = $state('');
 	let submitting = $state(false);
 	let submitted = $state(false);
+	let awaitingAuth = $state(false);
 	let consenting = $state(false);
 	let consented = $state(false);
+	let consentError = $state('');
 	let errorMsg = $state('');
 	const extractor = new GmailExtractor(storeEmails);
 
@@ -175,24 +177,34 @@
 			if (extractor.completed) {
 				consented = true;
 				consenting = false;
+				awaitingAuth = false;
 				stopConsentMonitor();
 				return;
 			}
 
+			// OAuth callback succeeded and scanning started
+			if (extractor.isWorking && !consenting) {
+				awaitingAuth = false;
+				consenting = true;
+				displayedProgress = null;
+				startProgressAnimation();
+			}
+
 			if (extractor.hasError) {
 				consenting = false;
+				awaitingAuth = false;
+				consentError = 'Something went wrong. Please try signing in again.';
 				stopConsentMonitor();
 			}
 		}, 150);
 	}
 
 	function handleConsent() {
-		if (consenting || consented) return;
-		consenting = true;
+		if (awaitingAuth || consenting || consented) return;
+		awaitingAuth = true;
 		consented = false;
-		displayedProgress = null;
+		consentError = '';
 		startConsentMonitor();
-		startProgressAnimation();
 		void extractor.signIn();
 	}
 
@@ -203,8 +215,10 @@
 		email = '';
 		submitting = false;
 		submitted = false;
+		awaitingAuth = false;
 		consenting = false;
 		consented = false;
+		consentError = '';
 		errorMsg = '';
 		extractor.reset();
 	}
@@ -447,8 +461,12 @@
 										type="button"
 										class="consent-btn"
 										onclick={handleConsent}
-										disabled={extractor.isDisabled}>Sign in with Gmail</button
+										disabled={extractor.isDisabled || awaitingAuth}
+										>{awaitingAuth ? 'Waiting for authorization...' : 'Sign in with Gmail'}</button
 									>
+									{#if consentError}
+										<p class="error">{consentError}</p>
+									{/if}
 								{/if}
 							</div>
 						</div>
