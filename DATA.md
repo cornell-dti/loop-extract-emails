@@ -94,9 +94,7 @@ Write path:
 
 ## `extraction_jobs`
 
-Created at runtime by application code (not migration):
-
-- `src/lib/server/extraction-jobs.ts` -> `ensureExtractionTables`
+Created by migration: `migrations/0003_init_extraction_jobs_table.sql`
 
 Columns:
 

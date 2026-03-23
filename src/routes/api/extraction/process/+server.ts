@@ -1,10 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import {
-	ensureExtractionTables,
-	processExtractionJobStep,
-	scheduleExtractionStep
-} from '$lib/server/extraction-jobs';
+import { processExtractionJobStep, scheduleExtractionStep } from '$lib/server/extraction-jobs';
 
 export const POST: RequestHandler = async (event) => {
 	const db = event.platform?.env.loop_extract_emails_prod;
@@ -26,7 +22,6 @@ export const POST: RequestHandler = async (event) => {
 		return json({ ok: false, error: 'jobId and jobKey are required' }, { status: 400 });
 	}
 
-	await ensureExtractionTables(db);
 	const { done } = await processExtractionJobStep({ db, jobId, jobKey });
 
 	if (!done) {
