@@ -67,6 +67,7 @@ export class GmailExtractor {
 
 	progressPercent = $derived.by((): number | null => {
 		if (!this.estimatedTotalMessages || this.estimatedTotalMessages <= 0) return null;
+		if (this.scannedMessages <= 0) return null;
 		const percent = (this.scannedMessages / this.estimatedTotalMessages) * 100;
 		if (this.isWorking && percent >= 100) return 99;
 		return Math.min(100, Math.max(0, Math.round(percent)));
