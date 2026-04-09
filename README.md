@@ -27,4 +27,4 @@ pnpm build
 
 You can preview the production build with `pnpm preview`.
 
-> For deployment, a [Cloudflare Worker](https://workers.cloudflare.com/) is configured to automatically track the `main` branch.
+> For deployment, a [Cloudflare Worker](https://workers.cloudflare.com/) is configured to automatically track the `main` branch. This worker is connected to the `Dtiincubator@gmail.com` account.
