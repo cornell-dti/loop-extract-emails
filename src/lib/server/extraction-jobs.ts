@@ -188,9 +188,8 @@ export async function runExtractionJob(params: {
 	db: D1Database;
 	jobId: string;
 	jobKey: string;
-	requestOrigin?: string;
 }): Promise<void> {
-	const { db, jobId, jobKey, requestOrigin } = params;
+	const { db, jobId, jobKey } = params;
 
 	const job = await db
 		.prepare(
@@ -281,10 +280,6 @@ export async function runExtractionJob(params: {
 				jobId
 			)
 			.run();
-
-		if (!done && requestOrigin) {
-			await triggerExtractionStep(requestOrigin, { jobId, jobKey });
-		}
 	} catch (err) {
 		await markJobFailed(db, jobId, formatUserFacingError(err));
 	}
@@ -299,7 +294,7 @@ export function scheduleExtractionJob(
 	event: RequestEvent,
 	params: { db: D1Database; jobId: string; jobKey: string }
 ): void {
-	const run = runExtractionJob({ ...params, requestOrigin: event.url.origin });
+	const run = runExtractionJob(params);
 
 	if (event.platform?.ctx) {
 		event.platform.ctx.waitUntil(run);
@@ -317,21 +312,6 @@ export function maybeResumeExtractionJob(
 ): void {
 	if (params.status !== 'pending') return;
 	scheduleExtractionJob(event, params);
-}
-
-async function triggerExtractionStep(
-	requestOrigin: string,
-	payload: { jobId: string; jobKey: string }
-): Promise<void> {
-	const response = await fetch(new URL('/api/extraction/process', requestOrigin).toString(), {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(payload)
-	});
-
-	if (!response.ok) {
-		throw new Error(`Extraction step request failed with status ${response.status}`);
-	}
 }
 
 async function markJobFailed(db: D1Database, jobId: string, message: string): Promise<void> {
