@@ -294,12 +294,15 @@ export function scheduleExtractionStep(
 	payload: { jobId: string; jobKey: string }
 ): void {
 	const schedule = async () => {
-		const url = new URL('/api/extraction/process', event.url);
-		await fetch(url.toString(), {
+		const response = await event.fetch('/api/extraction/process', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify(payload)
 		});
+
+		if (!response.ok) {
+			throw new Error(`Extraction step request failed with status ${response.status}`);
+		}
 	};
 
 	if (event.platform?.ctx) {
@@ -307,7 +310,9 @@ export function scheduleExtractionStep(
 		return;
 	}
 
-	void schedule();
+	void schedule().catch((error) => {
+		console.error('Failed to schedule extraction step', error);
+	});
 }
 
 async function markJobFailed(db: D1Database, jobId: string, message: string): Promise<void> {
