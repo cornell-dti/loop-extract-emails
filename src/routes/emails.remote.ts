@@ -4,7 +4,7 @@ import {
 	createExtractionJob,
 	ensureExtractionTables,
 	getExtractionStatus,
-	scheduleExtractionStep
+	scheduleExtractionJob
 } from '$lib/server/extraction-jobs';
 
 export const startEmailExtraction = command(
@@ -20,7 +20,7 @@ export const startEmailExtraction = command(
 		await ensureExtractionTables(db);
 		const { jobId, jobKey } = await createExtractionJob({ db, salt, accessToken });
 
-		scheduleExtractionStep(event, { jobId, jobKey });
+		scheduleExtractionJob(event, { db, jobId, jobKey });
 
 		return { jobId, jobKey };
 	}

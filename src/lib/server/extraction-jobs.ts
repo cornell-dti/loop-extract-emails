@@ -7,7 +7,6 @@ const GMAIL_BATCH_ENDPOINT = 'https://www.googleapis.com/batch/gmail/v1';
 const EMAIL_BATCH_SIZE = 50;
 const GMAIL_BATCH_API_SIZE = 100;
 const MESSAGES_PER_PAGE = 500;
-const PAGES_PER_STEP = 1;
 
 const RETRY_BASE_DELAY_MS = 1000;
 const RETRY_MAX_DELAY_MS = 30_000;
@@ -179,11 +178,16 @@ export async function getExtractionStatus(db: D1Database, jobId: string, jobKey:
 	};
 }
 
-export async function processExtractionJobStep(params: {
+/**
+ * Runs the full extraction job to completion inside a single async function.
+ * This is designed to be passed directly to `ctx.waitUntil()` so it runs
+ * after the response is sent without any self-HTTP call chain.
+ */
+export async function runExtractionJob(params: {
 	db: D1Database;
 	jobId: string;
 	jobKey: string;
-}): Promise<{ done: boolean }> {
+}): Promise<void> {
 	const { db, jobId, jobKey } = params;
 
 	const job = await db
@@ -208,29 +212,24 @@ export async function processExtractionJobStep(params: {
 		.bind(jobId)
 		.first<ExtractionJobRow>();
 
-	if (!job || job.job_key !== jobKey) {
-		return { done: true };
-	}
-
-	if (job.status === 'completed' || job.status === 'failed') {
-		return { done: true };
-	}
-
+	if (!job || job.job_key !== jobKey) return;
+	if (job.status === 'completed' || job.status === 'failed') return;
 	if (!job.access_token) {
 		await markJobFailed(db, jobId, 'Missing access token for extraction job.');
-		return { done: true };
+		return;
 	}
 
+	await db
+		.prepare('UPDATE extraction_jobs SET status = ?, updated_at = ? WHERE id = ?')
+		.bind('running', new Date().toISOString(), jobId)
+		.run();
+
+	let nextPageToken = job.next_page_token ?? undefined;
+	let scannedMessages = job.scanned_messages;
+
 	try {
-		await db
-			.prepare('UPDATE extraction_jobs SET status = ?, updated_at = ? WHERE id = ?')
-			.bind('running', new Date().toISOString(), jobId)
-			.run();
-
-		let nextPageToken = job.next_page_token ?? undefined;
-		let scannedMessages = job.scanned_messages;
-
-		for (let i = 0; i < PAGES_PER_STEP; i += 1) {
+		// Process all pages in a single loop — no HTTP re-scheduling needed.
+		while (true) {
 			const listUrl = new URL(GMAIL_SCOPE_MESSAGES);
 			listUrl.searchParams.set('maxResults', String(MESSAGES_PER_PAGE));
 			listUrl.searchParams.set('includeSpamTrash', 'true');
@@ -250,68 +249,61 @@ export async function processExtractionJobStep(params: {
 			scannedMessages += messageIds.length;
 			nextPageToken = page.nextPageToken;
 
-			if (!nextPageToken) break;
+			// Update progress in DB so the polling UI stays responsive.
+			const uniqueSenders = await getUniqueSenderCount(db, job.user_hash);
+			const done = !nextPageToken;
+
+			await db
+				.prepare(
+					`
+                    UPDATE extraction_jobs
+                    SET
+                        status = ?,
+                        scanned_messages = ?,
+                        unique_senders = ?,
+                        next_page_token = ?,
+                        access_token = ?,
+                        last_error = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    `
+				)
+				.bind(
+					done ? 'completed' : 'running',
+					scannedMessages,
+					uniqueSenders,
+					nextPageToken ?? null,
+					done ? null : job.access_token,
+					new Date().toISOString(),
+					jobId
+				)
+				.run();
+
+			if (done) break;
 		}
-
-		const uniqueSenders = await getUniqueSenderCount(db, job.user_hash);
-		const done = !nextPageToken;
-
-		await db
-			.prepare(
-				`
-                UPDATE extraction_jobs
-                SET
-                    status = ?,
-                    scanned_messages = ?,
-                    unique_senders = ?,
-                    next_page_token = ?,
-                    access_token = ?,
-                    last_error = NULL,
-                    updated_at = ?
-                WHERE id = ?
-                `
-			)
-			.bind(
-				done ? 'completed' : 'running',
-				scannedMessages,
-				uniqueSenders,
-				nextPageToken ?? null,
-				done ? null : job.access_token,
-				new Date().toISOString(),
-				jobId
-			)
-			.run();
-
-		return { done };
 	} catch (err) {
 		await markJobFailed(db, jobId, formatUserFacingError(err));
-		return { done: true };
 	}
 }
 
-export function scheduleExtractionStep(
+/**
+ * Schedules the extraction job to run after the current response is sent.
+ * Uses ctx.waitUntil when available (Cloudflare Workers), otherwise fires
+ * and forgets.
+ */
+export function scheduleExtractionJob(
 	event: RequestEvent,
-	payload: { jobId: string; jobKey: string }
+	params: { db: D1Database; jobId: string; jobKey: string }
 ): void {
-	const schedule = async () => {
-		const response = await event.fetch('/api/extraction/process', {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(payload)
-		});
-
-		if (!response.ok) {
-			throw new Error(`Extraction step request failed with status ${response.status}`);
-		}
-	};
+	const run = runExtractionJob(params);
 
 	if (event.platform?.ctx) {
-		event.platform.ctx.waitUntil(schedule());
+		event.platform.ctx.waitUntil(run);
 		return;
 	}
 
-	void schedule().catch((error) => {
-		console.error('Failed to schedule extraction step', error);
+	run.catch((err) => {
+		console.error('Extraction job failed:', err);
 	});
 }
 
