@@ -4,6 +4,7 @@ import {
 	createExtractionJob,
 	ensureExtractionTables,
 	getExtractionStatus,
+	maybeResumeExtractionJob,
 	scheduleExtractionJob
 } from '$lib/server/extraction-jobs';
 
@@ -34,7 +35,9 @@ export const getEmailExtractionStatus = command(
 		if (!db) throw new Error('D1 binding not configured');
 
 		await ensureExtractionTables(db);
-		return getExtractionStatus(db, jobId, jobKey);
+		const status = await getExtractionStatus(db, jobId, jobKey);
+		maybeResumeExtractionJob(event, { db, jobId, jobKey, status: status.status });
+		return status;
 	}
 );
 

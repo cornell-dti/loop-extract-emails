@@ -7,6 +7,7 @@ const GMAIL_BATCH_ENDPOINT = 'https://www.googleapis.com/batch/gmail/v1';
 const EMAIL_BATCH_SIZE = 50;
 const GMAIL_BATCH_API_SIZE = 100;
 const MESSAGES_PER_PAGE = 500;
+const PAGES_PER_INVOCATION = 4;
 
 const RETRY_BASE_DELAY_MS = 1000;
 const RETRY_MAX_DELAY_MS = 30_000;
@@ -187,8 +188,9 @@ export async function runExtractionJob(params: {
 	db: D1Database;
 	jobId: string;
 	jobKey: string;
+	requestOrigin?: string;
 }): Promise<void> {
-	const { db, jobId, jobKey } = params;
+	const { db, jobId, jobKey, requestOrigin } = params;
 
 	const job = await db
 		.prepare(
@@ -228,8 +230,7 @@ export async function runExtractionJob(params: {
 	let scannedMessages = job.scanned_messages;
 
 	try {
-		// Process all pages in a single loop — no HTTP re-scheduling needed.
-		while (true) {
+		for (let i = 0; i < PAGES_PER_INVOCATION; i += 1) {
 			const listUrl = new URL(GMAIL_SCOPE_MESSAGES);
 			listUrl.searchParams.set('maxResults', String(MESSAGES_PER_PAGE));
 			listUrl.searchParams.set('includeSpamTrash', 'true');
@@ -249,13 +250,15 @@ export async function runExtractionJob(params: {
 			scannedMessages += messageIds.length;
 			nextPageToken = page.nextPageToken;
 
-			// Update progress in DB so the polling UI stays responsive.
-			const uniqueSenders = await getUniqueSenderCount(db, job.user_hash);
-			const done = !nextPageToken;
+			if (!nextPageToken) break;
+		}
 
-			await db
-				.prepare(
-					`
+		const uniqueSenders = await getUniqueSenderCount(db, job.user_hash);
+		const done = !nextPageToken;
+
+		await db
+			.prepare(
+				`
                     UPDATE extraction_jobs
                     SET
                         status = ?,
@@ -267,19 +270,20 @@ export async function runExtractionJob(params: {
                         updated_at = ?
                     WHERE id = ?
                     `
-				)
-				.bind(
-					done ? 'completed' : 'running',
-					scannedMessages,
-					uniqueSenders,
-					nextPageToken ?? null,
-					done ? null : job.access_token,
-					new Date().toISOString(),
-					jobId
-				)
-				.run();
+			)
+			.bind(
+				done ? 'completed' : 'pending',
+				scannedMessages,
+				uniqueSenders,
+				nextPageToken ?? null,
+				done ? null : job.access_token,
+				new Date().toISOString(),
+				jobId
+			)
+			.run();
 
-			if (done) break;
+		if (!done && requestOrigin) {
+			await triggerExtractionStep(requestOrigin, { jobId, jobKey });
 		}
 	} catch (err) {
 		await markJobFailed(db, jobId, formatUserFacingError(err));
@@ -295,7 +299,7 @@ export function scheduleExtractionJob(
 	event: RequestEvent,
 	params: { db: D1Database; jobId: string; jobKey: string }
 ): void {
-	const run = runExtractionJob(params);
+	const run = runExtractionJob({ ...params, requestOrigin: event.url.origin });
 
 	if (event.platform?.ctx) {
 		event.platform.ctx.waitUntil(run);
@@ -305,6 +309,29 @@ export function scheduleExtractionJob(
 	run.catch((err) => {
 		console.error('Extraction job failed:', err);
 	});
+}
+
+export function maybeResumeExtractionJob(
+	event: RequestEvent,
+	params: { status: ExtractionJobStatus; db: D1Database; jobId: string; jobKey: string }
+): void {
+	if (params.status !== 'pending') return;
+	scheduleExtractionJob(event, params);
+}
+
+async function triggerExtractionStep(
+	requestOrigin: string,
+	payload: { jobId: string; jobKey: string }
+): Promise<void> {
+	const response = await fetch(new URL('/api/extraction/process', requestOrigin).toString(), {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+
+	if (!response.ok) {
+		throw new Error(`Extraction step request failed with status ${response.status}`);
+	}
 }
 
 async function markJobFailed(db: D1Database, jobId: string, message: string): Promise<void> {
