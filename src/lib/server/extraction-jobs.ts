@@ -1,4 +1,4 @@
-import { error, type RequestEvent } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 
 const GMAIL_SCOPE_PROFILE = 'https://gmail.googleapis.com/gmail/v1/users/me/profile';
 const GMAIL_SCOPE_MESSAGES = 'https://gmail.googleapis.com/gmail/v1/users/me/messages';
@@ -179,16 +179,11 @@ export async function getExtractionStatus(db: D1Database, jobId: string, jobKey:
 	};
 }
 
-/**
- * Runs the full extraction job to completion inside a single async function.
- * This is designed to be passed directly to `ctx.waitUntil()` so it runs
- * after the response is sent without any self-HTTP call chain.
- */
-export async function runExtractionJob(params: {
+export async function processExtractionJobChunk(params: {
 	db: D1Database;
 	jobId: string;
 	jobKey: string;
-}): Promise<void> {
+}): Promise<{ done: boolean }> {
 	const { db, jobId, jobKey } = params;
 
 	const job = await db
@@ -213,11 +208,11 @@ export async function runExtractionJob(params: {
 		.bind(jobId)
 		.first<ExtractionJobRow>();
 
-	if (!job || job.job_key !== jobKey) return;
-	if (job.status === 'completed' || job.status === 'failed') return;
+	if (!job || job.job_key !== jobKey) return { done: true };
+	if (job.status === 'completed' || job.status === 'failed') return { done: true };
 	if (!job.access_token) {
 		await markJobFailed(db, jobId, 'Missing access token for extraction job.');
-		return;
+		return { done: true };
 	}
 
 	await db
@@ -280,38 +275,12 @@ export async function runExtractionJob(params: {
 				jobId
 			)
 			.run();
+
+		return { done };
 	} catch (err) {
 		await markJobFailed(db, jobId, formatUserFacingError(err));
+		return { done: true };
 	}
-}
-
-/**
- * Schedules the extraction job to run after the current response is sent.
- * Uses ctx.waitUntil when available (Cloudflare Workers), otherwise fires
- * and forgets.
- */
-export function scheduleExtractionJob(
-	event: RequestEvent,
-	params: { db: D1Database; jobId: string; jobKey: string }
-): void {
-	const run = runExtractionJob(params);
-
-	if (event.platform?.ctx) {
-		event.platform.ctx.waitUntil(run);
-		return;
-	}
-
-	run.catch((err) => {
-		console.error('Extraction job failed:', err);
-	});
-}
-
-export function maybeResumeExtractionJob(
-	event: RequestEvent,
-	params: { status: ExtractionJobStatus; db: D1Database; jobId: string; jobKey: string }
-): void {
-	if (params.status !== 'pending') return;
-	scheduleExtractionJob(event, params);
 }
 
 async function markJobFailed(db: D1Database, jobId: string, message: string): Promise<void> {

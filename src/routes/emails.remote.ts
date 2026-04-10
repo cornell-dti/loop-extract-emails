@@ -1,11 +1,10 @@
 import * as v from 'valibot';
 import { command, getRequestEvent } from '$app/server';
+import { enqueueExtractionJob } from '$lib/server/extraction-queue';
 import {
 	createExtractionJob,
 	ensureExtractionTables,
-	getExtractionStatus,
-	maybeResumeExtractionJob,
-	scheduleExtractionJob
+	getExtractionStatus
 } from '$lib/server/extraction-jobs';
 
 export const startEmailExtraction = command(
@@ -13,15 +12,16 @@ export const startEmailExtraction = command(
 	async ({ accessToken }) => {
 		const event = getRequestEvent();
 		const db = event.platform?.env.loop_extract_emails_prod;
+		const queue = event.platform?.env.EXTRACTION_QUEUE;
 		const salt = event.platform?.env.USER_HASH_SALT;
 
 		if (!db) throw new Error('D1 binding not configured');
+		if (!queue) throw new Error('Queue binding not configured');
 		if (!salt) throw new Error('USER_HASH_SALT not configured');
 
 		await ensureExtractionTables(db);
 		const { jobId, jobKey } = await createExtractionJob({ db, salt, accessToken });
-
-		scheduleExtractionJob(event, { db, jobId, jobKey });
+		await enqueueExtractionJob(queue, { jobId, jobKey });
 
 		return { jobId, jobKey };
 	}
@@ -35,9 +35,7 @@ export const getEmailExtractionStatus = command(
 		if (!db) throw new Error('D1 binding not configured');
 
 		await ensureExtractionTables(db);
-		const status = await getExtractionStatus(db, jobId, jobKey);
-		maybeResumeExtractionJob(event, { db, jobId, jobKey, status: status.status });
-		return status;
+		return getExtractionStatus(db, jobId, jobKey);
 	}
 );
 
