@@ -4,6 +4,10 @@
 		"svelte": {
 			"type": "remote",
 			"url": "https://mcp.svelte.dev/mcp"
+		},
+		"cloudflare": {
+			"type": "remote",
+			"url": "https://mcp.cloudflare.com/mcp"
 		}
 	}
 }

@@ -189,7 +189,11 @@
 		stopConsentMonitor();
 		consentMonitor = window.setInterval(() => {
 			if (extractor.isWorking) {
-				consenting = true;
+				if (!consenting) {
+					awaitingAuth = false;
+					consenting = true;
+					displayedProgress = null;
+				}
 				if (animFrameId === null) startProgressAnimation();
 			}
 
@@ -202,18 +206,10 @@
 				return;
 			}
 
-			// OAuth callback succeeded and scanning started
-			if (extractor.isWorking && !consenting) {
-				awaitingAuth = false;
-				consenting = true;
-				displayedProgress = null;
-				startProgressAnimation();
-			}
-
 			if (extractor.hasError) {
 				consenting = false;
 				awaitingAuth = false;
-				consentError = 'Something went wrong. Please try signing in again.';
+				consentError = extractor.status;
 				stopConsentMonitor();
 			}
 		}, 150);

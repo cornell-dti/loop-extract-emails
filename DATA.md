@@ -23,6 +23,15 @@ All server-side persistent data is stored in this D1 database.
 - Value shape: `{ "jobId": string, "jobKey": string }`
 - Used only to resume progress polling after refresh/navigation for an active extraction job.
 
+### 3) Cloudflare Queues (transient background job transport)
+
+- Queue binding: `EXTRACTION_QUEUE`
+- Queue name: `loop-extraction-jobs`
+- Config file: `wrangler.jsonc`
+- Stores lightweight `{ jobId, jobKey }` messages so extraction work can continue across worker invocations.
+
+This queue is operational infrastructure, not the source of record. Durable extracted data still lands in D1.
+
 ## Cloudflare account context
 
 This project is managed in a shared Cornell DTI Cloudflare account associated with `Dtiincubator@gmail.com`. Create your own Cloudflare account and you can easily be added to this.
@@ -122,11 +131,13 @@ What it stores:
 - Temporary OAuth access token used while extraction runs.
 - Cursor (`next_page_token`) for pagination across Gmail messages.
 - User mailbox identity in plaintext (`user_email`) and hashed (`user_hash`).
+- Queue-driven chunk progress across repeated worker invocations.
 
 Lifecycle details:
 
 - On job creation: row inserted with `status='pending'`, token set, and estimated Gmail message count if available.
-- During processing: status becomes `running`, scanned counts and unique sender counts are updated.
+- When a queue consumer starts work: status becomes `running`.
+- If more Gmail pages remain after that chunk: status returns to `pending` and the job is re-enqueued.
 - On completion: status set to `completed`, `access_token` set to `NULL`.
 - On failure: status set to `failed`, `access_token` and `job_key` set to `NULL`, `last_error` populated.
 
@@ -150,15 +161,18 @@ Stored data from this flow:
    - Fetches Gmail profile to determine `user_email` and total message estimate.
    - Computes `user_hash = SHA-256(user_email + USER_HASH_SALT)`.
    - Inserts an `extraction_jobs` row with job IDs and token.
-4. Background endpoint `/api/extraction/process` processes one page step at a time.
-5. For each Gmail page:
+   - Enqueues `{ jobId, jobKey }` onto `EXTRACTION_QUEUE`.
+4. `worker.js` receives queue batches and calls `handleExtractionQueueBatch`.
+5. Each queue invocation calls `processExtractionJobChunk` and processes up to 4 Gmail pages.
+6. For each Gmail page:
    - Retrieves message IDs.
    - Batch-fetches message metadata headers (`From` only).
    - Extracts normalized sender emails via regex.
    - Filters out the mailbox owner's own email.
    - Upserts into `emails` and `email_submissions`.
-6. Job status is polled by the client until `completed` or `failed`.
-7. On completion/failure, token is cleared server-side.
+7. If more pages remain, the same `{ jobId, jobKey }` payload is re-enqueued for the next worker invocation.
+8. Job status is polled by the client until `completed` or `failed`.
+9. On completion/failure, token is cleared server-side.
 
 Stored data from this flow:
 
@@ -175,6 +189,11 @@ Expected runtime env vars (Cloudflare Worker environment):
 - `GOOGLE_CLIENT_SECRET`: present in worker types; not directly referenced in current app code paths.
 - `USER_HASH_SALT`: server-side salt used when hashing user emails.
 
+Important runtime bindings:
+
+- `loop_extract_emails_prod`: Cloudflare D1 database binding.
+- `EXTRACTION_QUEUE`: Cloudflare Queue binding used to schedule extraction chunks.
+
 Important notes:
 
 - Do not commit real secret values in repository files.
@@ -188,5 +207,9 @@ Important notes:
 
 ## Operational notes
 
-- New environments should apply migrations before first use.
+- New environments must apply migrations before first use.
+- `extraction_jobs` is created by `migrations/0003_init_extraction_jobs_table.sql`; this branch intentionally does not rely on runtime table creation.
+- `worker.js` is the deployed worker entrypoint that combines the SvelteKit app with the queue consumer.
+- `wrangler.jsonc` defines the deployed worker, D1 binding, and queue producer/consumer configuration.
+- `wrangler.app.jsonc` is used by the Svelte adapter build configuration for the app worker.
 - `wrangler.jsonc` currently points to a remote D1 DB, so local development can affect production-linked data unless bindings are changed.
