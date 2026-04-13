@@ -4,10 +4,7 @@
 	"compatibility_date": "2026-02-20",
 	"compatibility_flags": ["nodejs_als"],
 	"account_id": "b287c94b13bd9617c8a7d2498ffcf8c2",
-	"main": "worker.js",
-	"build": {
-		"command": "pnpm build"
-	},
+	"main": ".svelte-kit/cloudflare/_worker.js",
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".svelte-kit/cloudflare"
@@ -22,14 +19,7 @@
 				"remote": true
 			}
 		],
-		"consumers": [
-			{
-				"queue": "loop-extraction-jobs",
-				"max_batch_size": 1,
-				"max_retries": 10,
-				"max_concurrency": 1
-			}
-		]
+		"consumers": []
 	},
 	"d1_databases": [
 		{

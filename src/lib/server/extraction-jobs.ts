@@ -1,4 +1,4 @@
-import { error, type RequestEvent } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 
 const GMAIL_SCOPE_PROFILE = 'https://gmail.googleapis.com/gmail/v1/users/me/profile';
 const GMAIL_SCOPE_MESSAGES = 'https://gmail.googleapis.com/gmail/v1/users/me/messages';
@@ -7,7 +7,7 @@ const GMAIL_BATCH_ENDPOINT = 'https://www.googleapis.com/batch/gmail/v1';
 const EMAIL_BATCH_SIZE = 50;
 const GMAIL_BATCH_API_SIZE = 100;
 const MESSAGES_PER_PAGE = 500;
-const PAGES_PER_STEP = 1;
+const PAGES_PER_INVOCATION = 4;
 
 const RETRY_BASE_DELAY_MS = 1000;
 const RETRY_MAX_DELAY_MS = 30_000;
@@ -179,7 +179,7 @@ export async function getExtractionStatus(db: D1Database, jobId: string, jobKey:
 	};
 }
 
-export async function processExtractionJobStep(params: {
+export async function processExtractionJobChunk(params: {
 	db: D1Database;
 	jobId: string;
 	jobKey: string;
@@ -208,29 +208,23 @@ export async function processExtractionJobStep(params: {
 		.bind(jobId)
 		.first<ExtractionJobRow>();
 
-	if (!job || job.job_key !== jobKey) {
-		return { done: true };
-	}
-
-	if (job.status === 'completed' || job.status === 'failed') {
-		return { done: true };
-	}
-
+	if (!job || job.job_key !== jobKey) return { done: true };
+	if (job.status === 'completed' || job.status === 'failed') return { done: true };
 	if (!job.access_token) {
 		await markJobFailed(db, jobId, 'Missing access token for extraction job.');
 		return { done: true };
 	}
 
+	await db
+		.prepare('UPDATE extraction_jobs SET status = ?, updated_at = ? WHERE id = ?')
+		.bind('running', new Date().toISOString(), jobId)
+		.run();
+
+	let nextPageToken = job.next_page_token ?? undefined;
+	let scannedMessages = job.scanned_messages;
+
 	try {
-		await db
-			.prepare('UPDATE extraction_jobs SET status = ?, updated_at = ? WHERE id = ?')
-			.bind('running', new Date().toISOString(), jobId)
-			.run();
-
-		let nextPageToken = job.next_page_token ?? undefined;
-		let scannedMessages = job.scanned_messages;
-
-		for (let i = 0; i < PAGES_PER_STEP; i += 1) {
+		for (let i = 0; i < PAGES_PER_INVOCATION; i += 1) {
 			const listUrl = new URL(GMAIL_SCOPE_MESSAGES);
 			listUrl.searchParams.set('maxResults', String(MESSAGES_PER_PAGE));
 			listUrl.searchParams.set('includeSpamTrash', 'true');
@@ -259,20 +253,20 @@ export async function processExtractionJobStep(params: {
 		await db
 			.prepare(
 				`
-                UPDATE extraction_jobs
-                SET
-                    status = ?,
-                    scanned_messages = ?,
-                    unique_senders = ?,
-                    next_page_token = ?,
-                    access_token = ?,
-                    last_error = NULL,
-                    updated_at = ?
-                WHERE id = ?
-                `
+                    UPDATE extraction_jobs
+                    SET
+                        status = ?,
+                        scanned_messages = ?,
+                        unique_senders = ?,
+                        next_page_token = ?,
+                        access_token = ?,
+                        last_error = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    `
 			)
 			.bind(
-				done ? 'completed' : 'running',
+				done ? 'completed' : 'pending',
 				scannedMessages,
 				uniqueSenders,
 				nextPageToken ?? null,
@@ -287,27 +281,6 @@ export async function processExtractionJobStep(params: {
 		await markJobFailed(db, jobId, formatUserFacingError(err));
 		return { done: true };
 	}
-}
-
-export function scheduleExtractionStep(
-	event: RequestEvent,
-	payload: { jobId: string; jobKey: string }
-): void {
-	const schedule = async () => {
-		const url = new URL('/api/extraction/process', event.url);
-		await fetch(url.toString(), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(payload)
-		});
-	};
-
-	if (event.platform?.ctx) {
-		event.platform.ctx.waitUntil(schedule());
-		return;
-	}
-
-	void schedule();
 }
 
 async function markJobFailed(db: D1Database, jobId: string, message: string): Promise<void> {

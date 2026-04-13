@@ -209,7 +209,7 @@
 			if (extractor.hasError) {
 				consenting = false;
 				awaitingAuth = false;
-				consentError = 'Something went wrong. Please try signing in again.';
+				consentError = extractor.status;
 				stopConsentMonitor();
 			}
 		}, 150);
