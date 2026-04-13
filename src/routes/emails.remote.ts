@@ -3,7 +3,6 @@ import { command, getRequestEvent } from '$app/server';
 import { enqueueExtractionJob } from '$lib/server/extraction-queue';
 import {
 	createExtractionJob,
-	ensureExtractionTables,
 	getExtractionStatus
 } from '$lib/server/extraction-jobs';
 
@@ -19,7 +18,6 @@ export const startEmailExtraction = command(
 		if (!queue) throw new Error('Queue binding not configured');
 		if (!salt) throw new Error('USER_HASH_SALT not configured');
 
-		await ensureExtractionTables(db);
 		const { jobId, jobKey } = await createExtractionJob({ db, salt, accessToken });
 		await enqueueExtractionJob(queue, { jobId, jobKey });
 
@@ -34,7 +32,6 @@ export const getEmailExtractionStatus = command(
 		const db = event.platform?.env.loop_extract_emails_prod;
 		if (!db) throw new Error('D1 binding not configured');
 
-		await ensureExtractionTables(db);
 		return getExtractionStatus(db, jobId, jobKey);
 	}
 );

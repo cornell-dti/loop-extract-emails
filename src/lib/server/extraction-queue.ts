@@ -1,4 +1,4 @@
-import { ensureExtractionTables, processExtractionJobChunk } from '$lib/server/extraction-jobs';
+import { processExtractionJobChunk } from '$lib/server/extraction-jobs';
 
 export type ExtractionQueueMessage = {
 	jobId: string;
@@ -21,8 +21,6 @@ export async function handleExtractionQueueBatch(
 	batch: MessageBatch<unknown>,
 	env: ExtractionQueueEnv
 ): Promise<void> {
-	await ensureExtractionTables(env.loop_extract_emails_prod);
-
 	for (const message of batch.messages) {
 		if (!isExtractionQueueMessage(message.body)) {
 			console.warn('Ignoring malformed extraction queue message');
