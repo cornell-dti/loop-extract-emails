@@ -140,8 +140,16 @@
 
 		let lastTs = performance.now();
 		const startTs = lastTs;
+		let lastVisualUpdateTs = lastTs;
+		const VISUAL_UPDATE_INTERVAL_MS = 50;
 
 		function tick(now: DOMHighResTimeStamp) {
+			if (now - lastVisualUpdateTs < VISUAL_UPDATE_INTERVAL_MS) {
+				scannedAnimFrameId = requestAnimationFrame(tick);
+				return;
+			}
+
+			lastVisualUpdateTs = now;
 			const dt = Math.max(now - lastTs, 16);
 			lastTs = now;
 
@@ -792,6 +800,8 @@
 		font-size: 1.5rem;
 		font-weight: 700;
 		color: #eb7128;
+		font-variant-numeric: tabular-nums;
+		font-feature-settings: 'tnum' 1;
 	}
 
 	.scan-denom {
