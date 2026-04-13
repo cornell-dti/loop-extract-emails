@@ -56,14 +56,6 @@
 	let animFrameId: number | null = null;
 	let displayedScannedMessages = $state(0);
 	let scannedAnimFrameId: number | null = null;
-	let displayedScanCount = $derived.by(() => {
-		const estimated = extractor.estimatedTotalMessages;
-		if (estimated !== null && displayedProgress !== null) {
-			// Keep counter visually aligned with the animated progress bar.
-			return Math.max(0, Math.floor((Math.min(displayedProgress, 99.9) / 100) * estimated));
-		}
-		return displayedScannedMessages;
-	});
 
 	export const snapshot: Snapshot<ConsentSnapshot> = {
 		capture: () => ({
@@ -153,7 +145,12 @@
 			const dt = Math.max(now - lastTs, 16);
 			lastTs = now;
 
-			const target = extractor.scannedMessages;
+			const estimated = extractor.estimatedTotalMessages;
+			const progressBackedTarget =
+				estimated !== null && displayedProgress !== null
+					? Math.max(0, Math.floor((Math.min(displayedProgress, 99.9) / 100) * estimated))
+					: null;
+			const target = progressBackedTarget ?? extractor.scannedMessages;
 			const diff = target - displayedScannedMessages;
 
 			if (diff > 0) {
@@ -163,7 +160,11 @@
 				const step = Math.min(diff, Math.min(maxStep, easedStep));
 				displayedScannedMessages += step;
 			} else if (diff < 0) {
-				displayedScannedMessages = target;
+				// Prevent visual ping-pong when target source momentarily drops.
+				// Only allow a hard reset when the flow is actually idle/reset.
+				if (!extractor.isWorking && extractor.scannedMessages === 0 && target === 0) {
+					displayedScannedMessages = 0;
+				}
 			} else if (target === 0 && extractor.isWorking) {
 				// Start moving immediately during initial backend lag so UI never looks stuck.
 				const warmupElapsedMs = now - startTs;
@@ -507,7 +508,7 @@
 								{#if consenting}
 									{#if extractor.estimatedTotalMessages !== null || extractor.scannedMessages > 0}
 										<div class="scan-counter">
-											<span class="scan-num">{displayedScanCount.toLocaleString()}</span
+											<span class="scan-num">{displayedScannedMessages.toLocaleString()}</span
 											>{#if extractor.estimatedTotalMessages}<span class="scan-denom"
 													>&thinsp;/&thinsp;~{extractor.estimatedTotalMessages.toLocaleString()}</span
 												>{/if}
