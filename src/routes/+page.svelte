@@ -54,6 +54,16 @@
 	// keeping the bar always visibly moving even between batches and during rate limiting.
 	let displayedProgress = $state<number | null>(null);
 	let animFrameId: number | null = null;
+	let displayedScannedMessages = $state(0);
+	let scannedAnimFrameId: number | null = null;
+	let displayedScanCount = $derived.by(() => {
+		const estimated = extractor.estimatedTotalMessages;
+		if (estimated !== null && displayedProgress !== null) {
+			// Keep counter visually aligned with the animated progress bar.
+			return Math.max(0, Math.floor((Math.min(displayedProgress, 99.9) / 100) * estimated));
+		}
+		return displayedScannedMessages;
+	});
 
 	export const snapshot: Snapshot<ConsentSnapshot> = {
 		capture: () => ({
@@ -114,6 +124,7 @@
 			loopySvg = null;
 			stopConsentMonitor();
 			stopProgressAnimation();
+			stopScannedCounterAnimation();
 			cleanupExtractor();
 		};
 	});
@@ -122,6 +133,40 @@
 		if (consentMonitor === null) return;
 		window.clearInterval(consentMonitor);
 		consentMonitor = null;
+	}
+
+	function startScannedCounterAnimation() {
+		stopScannedCounterAnimation();
+
+		let lastTs = performance.now();
+		const startTs = lastTs;
+
+		function tick(now: DOMHighResTimeStamp) {
+			const dt = Math.max(now - lastTs, 16);
+			lastTs = now;
+
+			const target = extractor.scannedMessages;
+			const diff = target - displayedScannedMessages;
+
+			if (diff > 0) {
+				// Catch up smoothly, but slower so it feels more incremental.
+				const maxStep = Math.max(4, Math.floor((dt / 1000) * 180));
+				const easedStep = Math.max(1, Math.floor(diff * 0.05));
+				const step = Math.min(diff, Math.min(maxStep, easedStep));
+				displayedScannedMessages += step;
+			} else if (diff < 0) {
+				displayedScannedMessages = target;
+			} else if (target === 0 && extractor.isWorking) {
+				// Start moving immediately during initial backend lag so UI never looks stuck.
+				const warmupElapsedMs = now - startTs;
+				const warmupValue = Math.min(120, Math.max(0, Math.floor((warmupElapsedMs - 120) / 140)));
+				if (warmupValue > displayedScannedMessages) displayedScannedMessages = warmupValue;
+			}
+
+			scannedAnimFrameId = requestAnimationFrame(tick);
+		}
+
+		scannedAnimFrameId = requestAnimationFrame(tick);
 	}
 
 	function startProgressAnimation() {
@@ -185,6 +230,13 @@
 		}
 	}
 
+	function stopScannedCounterAnimation() {
+		if (scannedAnimFrameId !== null) {
+			cancelAnimationFrame(scannedAnimFrameId);
+			scannedAnimFrameId = null;
+		}
+	}
+
 	function startConsentMonitor() {
 		stopConsentMonitor();
 		consentMonitor = window.setInterval(() => {
@@ -193,15 +245,19 @@
 					awaitingAuth = false;
 					consenting = true;
 					displayedProgress = null;
+					displayedScannedMessages = extractor.scannedMessages;
 				}
 				if (animFrameId === null) startProgressAnimation();
+				if (scannedAnimFrameId === null) startScannedCounterAnimation();
 			}
 
 			if (extractor.completed) {
+				displayedScannedMessages = extractor.scannedMessages;
 				consented = true;
 				consenting = false;
 				awaitingAuth = false;
 				stopProgressAnimation();
+				stopScannedCounterAnimation();
 				stopConsentMonitor();
 				return;
 			}
@@ -210,6 +266,7 @@
 				consenting = false;
 				awaitingAuth = false;
 				consentError = extractor.status;
+				stopScannedCounterAnimation();
 				stopConsentMonitor();
 			}
 		}, 150);
@@ -227,7 +284,9 @@
 	function resetFlow() {
 		stopConsentMonitor();
 		stopProgressAnimation();
+		stopScannedCounterAnimation();
 		displayedProgress = null;
+		displayedScannedMessages = 0;
 		email = '';
 		submitting = false;
 		submitted = false;
@@ -440,7 +499,7 @@
 								{#if consenting}
 									{#if extractor.estimatedTotalMessages !== null || extractor.scannedMessages > 0}
 										<div class="scan-counter">
-											<span class="scan-num">{extractor.scannedMessages.toLocaleString()}</span
+											<span class="scan-num">{displayedScanCount.toLocaleString()}</span
 											>{#if extractor.estimatedTotalMessages}<span class="scan-denom"
 													>&thinsp;/&thinsp;~{extractor.estimatedTotalMessages.toLocaleString()}</span
 												>{/if}

@@ -1,10 +1,12 @@
 import * as v from 'valibot';
 import { command, getRequestEvent } from '$app/server';
+import { dev } from '$app/environment';
 import { enqueueExtractionJob } from '$lib/server/extraction-queue';
 import {
 	createExtractionJob,
 	ensureExtractionTables,
-	getExtractionStatus
+	getExtractionStatus,
+	processExtractionJobChunk
 } from '$lib/server/extraction-jobs';
 
 export const startEmailExtraction = command(
@@ -21,7 +23,13 @@ export const startEmailExtraction = command(
 
 		await ensureExtractionTables(db);
 		const { jobId, jobKey } = await createExtractionJob({ db, salt, accessToken });
-		await enqueueExtractionJob(queue, { jobId, jobKey });
+
+		if (dev) {
+			// In Vite dev, Workers queue consumers are not running. Process chunks locally.
+			void runExtractionLocally(db, jobId, jobKey);
+		} else {
+			await enqueueExtractionJob(queue, { jobId, jobKey });
+		}
 
 		return { jobId, jobKey };
 	}
@@ -49,3 +57,24 @@ export const storeWaitlistEmail = command(
 		return { success: true };
 	}
 );
+
+const localRunners = new Set<string>();
+
+async function runExtractionLocally(db: D1Database, jobId: string, jobKey: string) {
+	const runnerKey = `${jobId}:${jobKey}`;
+	if (localRunners.has(runnerKey)) return;
+	localRunners.add(runnerKey);
+
+	try {
+		while (true) {
+			const result = await processExtractionJobChunk({ db, jobId, jobKey });
+			if (result.done) break;
+			// Yield to keep local dev server responsive between chunks.
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+	} catch (error) {
+		console.error('Local extraction runner failed:', error);
+	} finally {
+		localRunners.delete(runnerKey);
+	}
+}
