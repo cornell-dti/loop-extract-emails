@@ -499,7 +499,7 @@
 					{#if submitted && !consented}
 						<div class="consent-screen">
 							<p class="success">
-								{consenting ? 'Scanning your inbox\u2026' : "You're on the list!"}
+								{consenting ? 'Scanning your inbox\u2026' : "Join our raffle!"}
 							</p>
 							{#if consenting}
 								<p class="scan-subtitle">Feel free to leave this running in the background.</p>
@@ -523,7 +523,7 @@
 									{/if}
 								{:else}
 									<div class="consent-body">
-										<p class="consent-heading">While you wait, help us build Loop?</p>
+										<p class="consent-heading">Help us build Loop and win a prize?</p>
 										<p class="consent-desc">
 											Help us figure out what's out there! We'll take a quick peek at your Gmail
 											senders to map the listserv landscape — sender info only, never email content.
